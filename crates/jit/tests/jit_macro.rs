@@ -303,6 +303,53 @@ fn block_supports_mov_alias_with_w_dynamic_registers() {
 }
 
 #[test]
+fn block_supports_ubfx_and_sbfx_aliases() {
+    let mut storage = [0u32; 4];
+    let mut ops = CodeWriter::new(&mut storage);
+
+    jit!(ops
+        ; ubfx x0, x1, #4, #8
+        ; sbfx x2, x3, #1, #5
+    )
+    .expect("ubfx/sbfx aliases should normalize and encode");
+
+    let code = emitted(&ops);
+    assert_eq!(
+        word_at(&code, 0),
+        encode("ubfm", &[x(0), x(1), imm(4), imm(11)])
+            .expect("ubfm")
+            .unpack()
+    );
+    assert_eq!(
+        word_at(&code, 1),
+        encode("sbfm", &[x(2), x(3), imm(1), imm(5)])
+            .expect("sbfm")
+            .unpack()
+    );
+}
+
+#[test]
+fn block_supports_ubfx_alias_with_dynamic_immediates() {
+    let mut storage = [0u32; 4];
+    let mut ops = CodeWriter::new(&mut storage);
+    let lsb = 4i64;
+    let width = 8i64;
+
+    jit!(ops
+        ; ubfx x0, x1, #lsb, #width
+    )
+    .expect("ubfx dynamic immediates should normalize and encode");
+
+    let code = emitted(&ops);
+    assert_eq!(
+        word_at(&code, 0),
+        encode("ubfm", &[x(0), x(1), imm(lsb), imm(lsb + width - 1)])
+            .expect("ubfm")
+            .unpack()
+    );
+}
+
+#[test]
 fn block_normalizes_addsub_register_shift_forms() {
     let mut storage = [0u32; 4];
     let mut ops = CodeWriter::new(&mut storage);

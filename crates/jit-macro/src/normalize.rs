@@ -97,6 +97,13 @@ fn operand_as_condition(arg: &JitArg) -> Option<ConditionAst> {
     }
 }
 
+fn operand_as_immediate_expr(arg: &JitArg) -> Option<Expr> {
+    match arg {
+        JitArg::Operand(OperandAst::Immediate(expr)) => Some(expr.clone()),
+        _ => None,
+    }
+}
+
 fn arg_register(reg: ParsedRegister) -> JitArg {
     JitArg::Operand(OperandAst::Register(reg))
 }
@@ -304,6 +311,25 @@ fn normalize_alias_instruction(
             if inst.args.len() == 2 {
                 inst.args.push(arg_immediate_zero());
             }
+            Some(inst)
+        }
+        AliasTransform::BitfieldUbfx | AliasTransform::BitfieldSbfx => {
+            if inst.args.len() != 4 {
+                return None;
+            }
+            let rd = operand_as_gpr_register(inst.args.first()?)?;
+            let rn = operand_as_gpr_register(inst.args.get(1)?)?;
+            let lsb = operand_as_immediate_expr(inst.args.get(2)?)?;
+            let width = operand_as_immediate_expr(inst.args.get(3)?)?;
+            let imms = parse_quote! { ((#lsb) + (#width) - 1) };
+
+            inst.op_name = rule.canonical.to_owned();
+            inst.args = vec![
+                arg_register(rd),
+                arg_register(rn),
+                JitArg::Operand(OperandAst::Immediate(lsb)),
+                JitArg::Operand(OperandAst::Immediate(imms)),
+            ];
             Some(inst)
         }
         _ => None,
