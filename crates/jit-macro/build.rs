@@ -15,6 +15,8 @@ struct AliasRuleSpec {
     alias: String,
     canonical: String,
     transform: String,
+    #[serde(default)]
+    fixed_imms: Option<i16>,
 }
 
 fn main() {
@@ -109,6 +111,7 @@ fn transform_variant_name(name: &str) -> Result<&'static str, Box<dyn std::error
         "bitfield_ubfx" => Ok("BitfieldUbfx"),
         "bitfield_sbfx" => Ok("BitfieldSbfx"),
         "bitfield_sbfiz" => Ok("BitfieldSbfiz"),
+        "bitfield_extract_fixed" => Ok("BitfieldExtractFixed"),
         "extend_long_zero" => Ok("ExtendLongZero"),
         "stsetl_like" => Ok("StsetlLike"),
         "dc_like" => Ok("DcLike"),
@@ -141,6 +144,7 @@ pub(crate) enum AliasTransform {\n\
     BitfieldUbfx,\n\
     BitfieldSbfx,\n\
     BitfieldSbfiz,\n\
+    BitfieldExtractFixed,\n\
     ExtendLongZero,\n\
     StsetlLike,\n\
     DcLike,\n\
@@ -150,6 +154,7 @@ pub(crate) struct AliasRule {\n\
     pub alias: &'static str,\n\
     pub canonical: &'static str,\n\
     pub transform: AliasTransform,\n\
+    pub fixed_imms: i16,\n\
 }\n\n\
 pub(crate) static ALIAS_RULES: &[AliasRule] = &[\n",
     );
@@ -161,6 +166,10 @@ pub(crate) static ALIAS_RULES: &[AliasRule] = &[\n",
         out.push_str(&format!("        canonical: {:?},\n", rule.canonical));
         out.push_str(&format!(
             "        transform: AliasTransform::{transform},\n"
+        ));
+        out.push_str(&format!(
+            "        fixed_imms: {},\n",
+            rule.fixed_imms.unwrap_or(-1)
         ));
         out.push_str("    },\n");
     }

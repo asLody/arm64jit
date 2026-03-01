@@ -350,6 +350,60 @@ fn block_supports_ubfx_alias_with_dynamic_immediates() {
 }
 
 #[test]
+fn block_supports_scalar_sxt_uxt_alias_family_despite_sve_name_collision() {
+    let mut storage = [0u32; 8];
+    let mut ops = CodeWriter::new(&mut storage);
+
+    jit!(ops
+        ; sxtb X(0), W(1)
+        ; sxth X(0), W(1)
+        ; sxtw X(0), W(1)
+        ; uxtb X(2), W(3)
+        ; uxth X(2), W(3)
+        ; uxtw X(2), W(3)
+    )
+    .expect("scalar sxt*/uxt* aliases should normalize to sbfm/ubfm");
+
+    let code = emitted(&ops);
+    assert_eq!(
+        word_at(&code, 0),
+        encode("sbfm", &[x(0), x(1), imm(0), imm(7)])
+            .expect("sbfm")
+            .unpack()
+    );
+    assert_eq!(
+        word_at(&code, 1),
+        encode("sbfm", &[x(0), x(1), imm(0), imm(15)])
+            .expect("sbfm")
+            .unpack()
+    );
+    assert_eq!(
+        word_at(&code, 2),
+        encode("sbfm", &[x(0), x(1), imm(0), imm(31)])
+            .expect("sbfm")
+            .unpack()
+    );
+    assert_eq!(
+        word_at(&code, 3),
+        encode("ubfm", &[x(2), x(3), imm(0), imm(7)])
+            .expect("ubfm")
+            .unpack()
+    );
+    assert_eq!(
+        word_at(&code, 4),
+        encode("ubfm", &[x(2), x(3), imm(0), imm(15)])
+            .expect("ubfm")
+            .unpack()
+    );
+    assert_eq!(
+        word_at(&code, 5),
+        encode("ubfm", &[x(2), x(3), imm(0), imm(31)])
+            .expect("ubfm")
+            .unpack()
+    );
+}
+
+#[test]
 fn block_normalizes_addsub_register_shift_forms() {
     let mut storage = [0u32; 4];
     let mut ops = CodeWriter::new(&mut storage);

@@ -210,6 +210,15 @@ mod tests {
         })
     }
 
+    fn w(code: u8) -> Operand {
+        Operand::Register(RegisterOperand {
+            code,
+            class: RegClass::W,
+            arrangement: None,
+            lane: None,
+        })
+    }
+
     fn imm(value: i64) -> Operand {
         Operand::Immediate(value)
     }
@@ -283,6 +292,27 @@ mod tests {
                     "shortlist mismatch for {mnemonic}"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn encode_supports_scalar_sxt_uxt_alias_family() {
+        let cases = [
+            ("sxtb", "sbfm", 7),
+            ("sxth", "sbfm", 15),
+            ("sxtw", "sbfm", 31),
+            ("uxtb", "ubfm", 7),
+            ("uxth", "ubfm", 15),
+            ("uxtw", "ubfm", 31),
+        ];
+
+        for (alias, canonical, imms) in cases {
+            let got = encode(alias, &[x(0), w(1)]).unwrap_or_else(|err| {
+                panic!("{alias} alias should encode, got error: {err:?}");
+            });
+            let expected =
+                encode(canonical, &[x(0), x(1), imm(0), imm(imms)]).expect("canonical bitfield");
+            assert_eq!(got.unpack(), expected.unpack(), "alias {alias} mismatch");
         }
     }
 

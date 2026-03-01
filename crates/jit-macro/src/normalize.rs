@@ -313,6 +313,23 @@ fn normalize_alias_instruction(
             }
             Some(inst)
         }
+        AliasTransform::BitfieldExtractFixed => {
+            if inst.args.len() != 2 {
+                return None;
+            }
+            let rd = operand_as_gpr_register(inst.args.first()?)?;
+            let mut rn = operand_as_gpr_register(inst.args.get(1)?)?;
+            rn.class = gpr_data_class(rd.class)?;
+            let imms_lit = i64::from(rule.fixed_imms);
+            inst.op_name = rule.canonical.to_owned();
+            inst.args = vec![
+                arg_register(rd),
+                arg_register(rn),
+                JitArg::Operand(OperandAst::Immediate(parse_quote!(0))),
+                JitArg::Operand(OperandAst::Immediate(parse_quote!(#imms_lit))),
+            ];
+            Some(inst)
+        }
         AliasTransform::BitfieldUbfx | AliasTransform::BitfieldSbfx => {
             if inst.args.len() != 4 {
                 return None;

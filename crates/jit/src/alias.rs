@@ -24,6 +24,7 @@ enum AliasTransform {
     BitfieldUbfx,
     BitfieldSbfx,
     BitfieldSbfiz,
+    BitfieldExtractFixed,
     ExtendLongZero,
     StsetlLike,
     DcLike,
@@ -35,6 +36,7 @@ pub(crate) struct AliasRule {
     canonical: &'static str,
     canonical_id: u16,
     transform: AliasTransform,
+    fixed_imms: i16,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
@@ -234,6 +236,7 @@ pub(crate) fn canonicalize_alias<'a>(
             &scratch[..operands.len() + 1],
         ));
     }
+
     let Some(rule) = lookup_alias_rule(mnemonic) else {
         return Ok((None, mnemonic, operands));
     };
@@ -415,6 +418,46 @@ pub(crate) fn canonicalize_alias<'a>(
             scratch[1] = Operand::Register(rn);
             scratch[2] = Operand::Register(rn);
             scratch[3] = Operand::Condition(invert_condition(cond));
+            Ok((
+                Some(MnemonicId(rule.canonical_id)),
+                rule.canonical,
+                &scratch[..4],
+            ))
+        }
+        AliasTransform::BitfieldExtractFixed => {
+            if operands.len() != 2 {
+                return Err(alias_hint(
+                    AliasNoMatchHint::BitfieldNeedsExactlyFourOperands,
+                ));
+            }
+            let rd =
+                require_gpr_register(operands[0], AliasNoMatchHint::BitfieldDestinationMustBeGpr)?;
+            let rn = require_gpr_register(operands[1], AliasNoMatchHint::BitfieldSourceMustBeGpr)?;
+            let Some(bits) = gpr_data_bits(rd.class) else {
+                return Err(alias_hint(AliasNoMatchHint::BitfieldDestinationMustBeGpr));
+            };
+            if gpr_data_bits(rn.class).is_none() {
+                return Err(alias_hint(AliasNoMatchHint::BitfieldSourceMustBeGpr));
+            }
+            let imms = i64::from(rule.fixed_imms);
+            if imms < 0 || imms >= bits {
+                return Err(alias_hint(AliasNoMatchHint::BitfieldRangeInvalid {
+                    bits: bits_to_u8(bits),
+                }));
+            }
+            let data_class = gpr_data_class(rd.class)
+                .ok_or(alias_hint(AliasNoMatchHint::BitfieldDestinationMustBeGpr))?;
+
+            scratch[0] = Operand::Register(RegisterOperand {
+                class: data_class,
+                ..rd
+            });
+            scratch[1] = Operand::Register(RegisterOperand {
+                class: data_class,
+                ..rn
+            });
+            scratch[2] = Operand::Immediate(0);
+            scratch[3] = Operand::Immediate(imms);
             Ok((
                 Some(MnemonicId(rule.canonical_id)),
                 rule.canonical,
@@ -606,4 +649,35 @@ pub fn supports_alias_mnemonic(mnemonic: &str) -> bool {
 #[inline]
 pub(crate) fn has_alias(mnemonic: &str) -> bool {
     supports_alias_mnemonic(mnemonic)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ALIAS_RULES, alias_canonical_mnemonic, supports_alias_mnemonic};
+
+    #[test]
+    fn alias_rules_are_sorted_for_binary_search() {
+        for window in ALIAS_RULES.windows(2) {
+            let lhs = window[0].alias;
+            let rhs = window[1].alias;
+            assert!(
+                lhs <= rhs,
+                "ALIAS_RULES must stay sorted: {lhs:?} > {rhs:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn scalar_sxt_uxt_aliases_are_registered() {
+        for mnemonic in ["sxtb", "sxth", "sxtw", "uxtb", "uxth", "uxtw"] {
+            assert!(
+                supports_alias_mnemonic(mnemonic),
+                "expected alias mnemonic to be registered: {mnemonic}"
+            );
+            assert!(
+                matches!(alias_canonical_mnemonic(mnemonic), Some("sbfm" | "ubfm")),
+                "unexpected canonical mapping for {mnemonic}"
+            );
+        }
+    }
 }
