@@ -1,0 +1,12 @@
+[package]
+name = "jit-spec"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Arm AArch64 spec parser and model for arm64jit"
+repository = "https://github.com/asLody/arm64jit"
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true

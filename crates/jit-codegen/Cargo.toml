@@ -1,0 +1,15 @@
+[package]
+name = "jit-codegen"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Code generator for arm64jit instruction metadata"
+repository = "https://github.com/asLody/arm64jit"
+
+[dependencies]
+jit-spec = { path = "../jit-spec", version = "0.1.2" }
+thiserror.workspace = true
+
+[[bin]]
+name = "jit-codegen"
+path = "src/bin/jit_codegen.rs"

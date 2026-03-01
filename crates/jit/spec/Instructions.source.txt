@@ -1,0 +1,8 @@
+Source page: https://developer.arm.com/Architectures/A-Profile%20Architecture#Downloads
+Package: AARCHMRS_OPENSOURCE_A_profile_FAT-2025-12.tar.gz
+Package URL: https://developer.arm.com/-/cdn-downloads/permalink/Exploration-Tools-OS-Machine-Readable-Data/AARCHMRS_BSD/AARCHMRS_OPENSOURCE_A_profile_FAT-2025-12.tar.gz
+Package SHA256: 4dc5da62a5c856d7b1086b895075f54807f821ea21a333049cb0f40f9479cecc
+Extracted file: Instructions.json
+Extracted SHA256: bedf5f8fc142d6232f15caaa170b9fab996a732db0b04bf4604e91fb10c3244b
+Fetched (UTC): 2026-02-25T23:03:11Z
+Purpose: vendored build input for jit and jit-macro build scripts.

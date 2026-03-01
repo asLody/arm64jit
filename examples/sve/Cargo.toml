@@ -1,0 +1,9 @@
+[package]
+name = "sve-example"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+arm64jit = { path = "../../crates/jit" }
+capstone = "0.14"

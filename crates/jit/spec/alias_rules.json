@@ -1,0 +1,41 @@
+[
+  { "alias": "ret", "canonical": "ret", "transform": "ret_default" },
+
+  { "alias": "cmp", "canonical": "subs", "transform": "cmp_like" },
+  { "alias": "cmn", "canonical": "adds", "transform": "cmn_like" },
+  { "alias": "tst", "canonical": "ands", "transform": "tst_like" },
+  { "alias": "mov", "canonical": "add", "transform": "mov_like" },
+  { "alias": "mvn", "canonical": "eon", "transform": "mvn_like" },
+
+  { "alias": "cinc", "canonical": "csinc", "transform": "cinc_like" },
+  { "alias": "cset", "canonical": "csinc", "transform": "cset_like" },
+  { "alias": "csetm", "canonical": "csinv", "transform": "cset_like" },
+  { "alias": "cneg", "canonical": "csneg", "transform": "cneg_like" },
+
+  { "alias": "bfi", "canonical": "bfm", "transform": "bitfield_bfi" },
+  { "alias": "bfxil", "canonical": "bfm", "transform": "bitfield_bfxil" },
+  { "alias": "bfc", "canonical": "bfm", "transform": "bitfield_bfc" },
+  { "alias": "ubfx", "canonical": "ubfm", "transform": "bitfield_ubfx" },
+  { "alias": "sbfx", "canonical": "sbfm", "transform": "bitfield_sbfx" },
+  { "alias": "sbfiz", "canonical": "sbfm", "transform": "bitfield_sbfiz" },
+
+  { "alias": "sxtl", "canonical": "sshll", "transform": "extend_long_zero" },
+  { "alias": "sxtl2", "canonical": "sshll", "transform": "extend_long_zero" },
+  { "alias": "uxtl", "canonical": "ushll", "transform": "extend_long_zero" },
+  { "alias": "uxtl2", "canonical": "ushll", "transform": "extend_long_zero" },
+
+  { "alias": "stsetl", "canonical": "ldsetl", "transform": "stsetl_like" },
+  { "alias": "dc", "canonical": "sys", "transform": "dc_like" },
+
+  { "alias": "fcvtl2", "canonical": "fcvtl", "transform": "pure_rename" },
+  { "alias": "fcvtn2", "canonical": "fcvtn", "transform": "pure_rename" },
+  { "alias": "pmull2", "canonical": "pmull", "transform": "pure_rename" },
+  { "alias": "shrn2", "canonical": "shrn", "transform": "pure_rename" },
+  { "alias": "smull2", "canonical": "smull", "transform": "pure_rename" },
+  { "alias": "sqxtn2", "canonical": "sqxtn", "transform": "pure_rename" },
+  { "alias": "sqxtun2", "canonical": "sqxtun", "transform": "pure_rename" },
+  { "alias": "sshll2", "canonical": "sshll", "transform": "pure_rename" },
+  { "alias": "uabdl2", "canonical": "uabdl", "transform": "pure_rename" },
+  { "alias": "umull2", "canonical": "umull", "transform": "pure_rename" },
+  { "alias": "ldswpal", "canonical": "swpal", "transform": "pure_rename" }
+]
