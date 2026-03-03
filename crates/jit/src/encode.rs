@@ -112,14 +112,10 @@ fn encode_mnemonic_id_no_alias(
         if saw_shape_match && let Some(variant) = selected_variant {
             match generated::encode_variant(variant, operands) {
                 Ok(code) => return Ok(code),
-                Err(
-                    EncodeError::NoMatchingVariant
-                    | EncodeError::AmbiguousVariant
-                    | EncodeError::OperandCountMismatch
-                    | EncodeError::OperandCountRange { .. }
-                    | EncodeError::NoMatchingVariantHint { .. },
-                ) => {}
-                Err(err) => return Err(err),
+                // Fast-path selection is an optimization only. Any failure must fall back
+                // to full matcher selection so mixed-width mnemonics never get stuck on a
+                // shape-only false positive.
+                Err(_) => {}
             }
         }
     }
@@ -360,6 +356,36 @@ mod tests {
         let asr = encode("asr", &[x(4), x(5), imm(13)]).expect("asr immediate alias should encode");
         let asr_expected = encode("sbfm", &[x(4), x(5), imm(13), imm(63)]).expect("canonical sbfm");
         assert_eq!(asr.unpack(), asr_expected.unpack(), "asr alias mismatch");
+    }
+
+    #[test]
+    fn encode_supports_scalar_shift_immediate_alias_boundary_values() {
+        let asr = encode("asr", &[x(0), x(1), imm(63)]).expect("asr #63 should encode");
+        let asr_expected =
+            encode("sbfm", &[x(0), x(1), imm(63), imm(63)]).expect("canonical sbfm #63");
+        assert_eq!(
+            asr.unpack(),
+            asr_expected.unpack(),
+            "asr #63 alias mismatch"
+        );
+
+        let lsr = encode("lsr", &[x(2), x(3), imm(63)]).expect("lsr #63 should encode");
+        let lsr_expected =
+            encode("ubfm", &[x(2), x(3), imm(63), imm(63)]).expect("canonical ubfm #63");
+        assert_eq!(
+            lsr.unpack(),
+            lsr_expected.unpack(),
+            "lsr #63 alias mismatch"
+        );
+
+        let lsl = encode("lsl", &[x(4), x(5), imm(63)]).expect("lsl #63 should encode");
+        let lsl_expected =
+            encode("ubfm", &[x(4), x(5), imm(1), imm(0)]).expect("canonical ubfm lsl #63");
+        assert_eq!(
+            lsl.unpack(),
+            lsl_expected.unpack(),
+            "lsl #63 alias mismatch"
+        );
     }
 
     #[test]

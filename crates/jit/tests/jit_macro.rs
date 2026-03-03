@@ -538,23 +538,26 @@ fn block_supports_ror_alias_mnemonic() {
 
 #[test]
 fn block_supports_scalar_shift_immediate_alias_family() {
-    let mut storage = [0u32; 8];
+    let mut storage = [0u32; 10];
     let mut ops = CodeWriter::new(&mut storage);
     let xd = 0u8;
     let xn = 1u8;
     let wd = 2u8;
     let wn = 3u8;
     let shift = 5u8;
+    let xbd = 6u8;
+    let xbn = 7u8;
 
     jit!(ops
         ; lsl X(xd), X(xn), #shift
         ; lsr W(wd), W(wn), #7
         ; asr x4, x5, #13
+        ; asr X(xbd), X(xbn), #63
     )
     .expect("lsl/lsr/asr immediate aliases should encode");
 
     let code = emitted(&ops);
-    assert_eq!(ops.pos(), 3);
+    assert_eq!(ops.pos(), 4);
     assert_eq!(
         word_at(&code, 0),
         encode("ubfm", &[x(xd), x(xn), imm(59), imm(58)])
@@ -571,6 +574,12 @@ fn block_supports_scalar_shift_immediate_alias_family() {
         word_at(&code, 2),
         encode("sbfm", &[x(4), x(5), imm(13), imm(63)])
             .expect("canonical asr->sbfm")
+            .unpack()
+    );
+    assert_eq!(
+        word_at(&code, 3),
+        encode("sbfm", &[x(xbd), x(xbn), imm(63), imm(63)])
+            .expect("canonical asr #63 -> sbfm")
             .unpack()
     );
 }

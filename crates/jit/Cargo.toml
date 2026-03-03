@@ -1,6 +1,6 @@
 [package]
 name = "arm64jit"
-version = "0.3.13"
+version = "0.3.14"
 edition.workspace = true
 license.workspace = true
 description = "Spec-driven AArch64 JIT assembler for Rust"
