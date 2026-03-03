@@ -322,11 +322,17 @@ mod tests {
     fn scalar_mul_family_alias_rules_exist_in_macro_table() {
         let mul = lookup_alias_rule("mul").expect("missing mul alias rule");
         let ror = lookup_alias_rule("ror").expect("missing ror alias rule");
+        let lsl = lookup_alias_rule("lsl").expect("missing lsl alias rule");
+        let lsr = lookup_alias_rule("lsr").expect("missing lsr alias rule");
+        let asr = lookup_alias_rule("asr").expect("missing asr alias rule");
         let smull = lookup_alias_rule("smull").expect("missing smull alias rule");
         let umull = lookup_alias_rule("umull").expect("missing umull alias rule");
 
         assert_eq!(mul.canonical, "madd");
         assert_eq!(ror.canonical, "extr");
+        assert_eq!(lsl.canonical, "ubfm");
+        assert_eq!(lsr.canonical, "ubfm");
+        assert_eq!(asr.canonical, "sbfm");
         assert_eq!(smull.canonical, "smaddl");
         assert_eq!(umull.canonical, "umaddl");
     }

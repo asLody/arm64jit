@@ -16,6 +16,9 @@ enum AliasTransform {
     MovLike,
     MulLike,
     RorLike,
+    LslImmediate,
+    LsrImmediate,
+    AsrImmediate,
     MvnLike,
     SmullLike,
     UmullLike,
@@ -152,6 +155,13 @@ fn gpr_data_bits(class: RegClass) -> Option<i64> {
     }
 }
 
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+enum ShiftImmediateAliasKind {
+    Lsl,
+    Lsr,
+    Asr,
+}
+
 #[inline]
 fn require_gpr_register(
     operand: Operand,
@@ -172,6 +182,77 @@ fn require_immediate(operand: Operand, hint: AliasNoMatchHint) -> Result<i64, En
         Operand::Immediate(value) => Ok(value),
         _ => Err(alias_hint(hint)),
     }
+}
+
+fn canonicalize_shift_immediate_alias<'a>(
+    kind: ShiftImmediateAliasKind,
+    rule: &AliasRule,
+    operands: &'a [Operand],
+    scratch: &'a mut [Operand; ALIAS_OPERAND_CAP],
+) -> Result<(Option<MnemonicId>, &'a str, &'a [Operand]), EncodeError> {
+    if operands.len() != 3 {
+        return Err(alias_hint(
+            AliasNoMatchHint::ShiftImmediateNeedsExactlyThreeOperands,
+        ));
+    }
+
+    let rd = require_gpr_register(
+        operands[0],
+        AliasNoMatchHint::ShiftImmediateDestinationMustBeDataGpr,
+    )?;
+    let rn = require_gpr_register(
+        operands[1],
+        AliasNoMatchHint::ShiftImmediateSourceMustMatchDestinationWidth,
+    )?;
+
+    let Some(data_class) = gpr_data_class(rd.class) else {
+        return Err(alias_hint(
+            AliasNoMatchHint::ShiftImmediateDestinationMustBeDataGpr,
+        ));
+    };
+    let Some(bits) = gpr_data_bits(data_class) else {
+        return Err(alias_hint(
+            AliasNoMatchHint::ShiftImmediateDestinationMustBeDataGpr,
+        ));
+    };
+    if gpr_data_class(rn.class) != Some(data_class) {
+        return Err(alias_hint(
+            AliasNoMatchHint::ShiftImmediateSourceMustMatchDestinationWidth,
+        ));
+    }
+
+    let shift = require_immediate(
+        operands[2],
+        AliasNoMatchHint::ShiftImmediateAmountMustBeImmediate,
+    )?;
+    if shift < 0 || shift >= bits {
+        return Err(alias_hint(
+            AliasNoMatchHint::ShiftImmediateAmountOutOfRange {
+                bits: bits_to_u8(bits),
+            },
+        ));
+    }
+
+    let (immr, imms) = match kind {
+        ShiftImmediateAliasKind::Lsl => ((-shift).rem_euclid(bits), bits - 1 - shift),
+        ShiftImmediateAliasKind::Lsr | ShiftImmediateAliasKind::Asr => (shift, bits - 1),
+    };
+
+    scratch[0] = Operand::Register(RegisterOperand {
+        class: data_class,
+        ..rd
+    });
+    scratch[1] = Operand::Register(RegisterOperand {
+        class: data_class,
+        ..rn
+    });
+    scratch[2] = Operand::Immediate(immr);
+    scratch[3] = Operand::Immediate(imms);
+    Ok((
+        Some(MnemonicId(rule.canonical_id)),
+        rule.canonical,
+        &scratch[..4],
+    ))
 }
 
 fn validate_lsb_width(
@@ -442,6 +523,24 @@ pub(crate) fn canonicalize_alias<'a>(
                 )),
             }
         }
+        AliasTransform::LslImmediate => canonicalize_shift_immediate_alias(
+            ShiftImmediateAliasKind::Lsl,
+            rule,
+            operands,
+            scratch,
+        ),
+        AliasTransform::LsrImmediate => canonicalize_shift_immediate_alias(
+            ShiftImmediateAliasKind::Lsr,
+            rule,
+            operands,
+            scratch,
+        ),
+        AliasTransform::AsrImmediate => canonicalize_shift_immediate_alias(
+            ShiftImmediateAliasKind::Asr,
+            rule,
+            operands,
+            scratch,
+        ),
         AliasTransform::MvnLike => {
             if operands.len() < 2 || operands.len() > 3 {
                 return Err(alias_hint(AliasNoMatchHint::MvnOperandFormInvalid));
@@ -847,5 +946,8 @@ mod tests {
         assert_eq!(alias_canonical_mnemonic("smull"), Some("smaddl"));
         assert_eq!(alias_canonical_mnemonic("umull"), Some("umaddl"));
         assert_eq!(alias_canonical_mnemonic("ror"), Some("extr"));
+        assert_eq!(alias_canonical_mnemonic("lsl"), Some("ubfm"));
+        assert_eq!(alias_canonical_mnemonic("lsr"), Some("ubfm"));
+        assert_eq!(alias_canonical_mnemonic("asr"), Some("sbfm"));
     }
 }

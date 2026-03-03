@@ -558,6 +558,19 @@ pub enum AliasNoMatchHint {
     RorSourceMustMatchDestinationWidth,
     /// `ror` shift must be immediate or same-width data GPR register.
     RorShiftMustBeImmediateOrMatchingRegister,
+    /// `lsl`/`lsr`/`asr` immediate alias expects exactly three operands.
+    ShiftImmediateNeedsExactlyThreeOperands,
+    /// `lsl`/`lsr`/`asr` immediate destination must be a data GPR (`Wn`/`Xn`).
+    ShiftImmediateDestinationMustBeDataGpr,
+    /// `lsl`/`lsr`/`asr` immediate source must match destination width.
+    ShiftImmediateSourceMustMatchDestinationWidth,
+    /// `lsl`/`lsr`/`asr` immediate shift must be an immediate.
+    ShiftImmediateAmountMustBeImmediate,
+    /// `lsl`/`lsr`/`asr` immediate shift out of range.
+    ShiftImmediateAmountOutOfRange {
+        /// Destination bit width (`32` or `64`).
+        bits: u8,
+    },
     /// `mvn` operand form is invalid.
     MvnOperandFormInvalid,
     /// `mvn` destination must be a GPR.
@@ -899,6 +912,33 @@ fn write_no_matching_hint(hint: &NoMatchingHint, f: &mut fmt::Formatter<'_>) -> 
             write!(
                 f,
                 "ror third operand must be an immediate shift or same-width data general-purpose register"
+            )
+        }
+        NoMatchingHint::Alias(AliasNoMatchHint::ShiftImmediateNeedsExactlyThreeOperands) => {
+            write!(
+                f,
+                "lsl/lsr/asr immediate alias expects exactly three operands"
+            )
+        }
+        NoMatchingHint::Alias(AliasNoMatchHint::ShiftImmediateDestinationMustBeDataGpr) => {
+            write!(
+                f,
+                "lsl/lsr/asr immediate destination must be a data general-purpose register (Wn/Xn)"
+            )
+        }
+        NoMatchingHint::Alias(AliasNoMatchHint::ShiftImmediateSourceMustMatchDestinationWidth) => {
+            write!(
+                f,
+                "lsl/lsr/asr immediate source register must be a data general-purpose register matching destination width"
+            )
+        }
+        NoMatchingHint::Alias(AliasNoMatchHint::ShiftImmediateAmountMustBeImmediate) => {
+            write!(f, "lsl/lsr/asr immediate shift amount must be an immediate")
+        }
+        NoMatchingHint::Alias(AliasNoMatchHint::ShiftImmediateAmountOutOfRange { bits }) => {
+            write!(
+                f,
+                "lsl/lsr/asr immediate shift out of range (expected 0 <= shift < {bits})"
             )
         }
         NoMatchingHint::Alias(AliasNoMatchHint::MvnOperandFormInvalid) => write!(

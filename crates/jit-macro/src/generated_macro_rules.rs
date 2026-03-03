@@ -4007,6 +4007,9 @@ TstLike,
 MovLike,
 MulLike,
 RorLike,
+LslImmediate,
+LsrImmediate,
+AsrImmediate,
 MvnLike,
 SmullLike,
 UmullLike,
@@ -4034,6 +4037,12 @@ pub fixed_imms: i16,
 }
 
 pub(crate) static ALIAS_RULES: &[AliasRule] = &[
+    AliasRule {
+        alias: "asr",
+        canonical: "sbfm",
+        transform: AliasTransform::AsrImmediate,
+        fixed_imms: -1,
+    },
     AliasRule {
         alias: "bfc",
         canonical: "bfm",
@@ -4110,6 +4119,18 @@ pub(crate) static ALIAS_RULES: &[AliasRule] = &[
         alias: "ldswpal",
         canonical: "swpal",
         transform: AliasTransform::PureRename,
+        fixed_imms: -1,
+    },
+    AliasRule {
+        alias: "lsl",
+        canonical: "ubfm",
+        transform: AliasTransform::LslImmediate,
+        fixed_imms: -1,
+    },
+    AliasRule {
+        alias: "lsr",
+        canonical: "ubfm",
+        transform: AliasTransform::LsrImmediate,
         fixed_imms: -1,
     },
     AliasRule {

@@ -198,7 +198,8 @@ mod tests {
     use alloc::vec;
     use alloc::vec::Vec;
     use jit_core::{
-        AddressingMode, ConditionCode, MemoryOffset, MemoryOperand, RegClass, RegisterOperand,
+        AddressingMode, AliasNoMatchHint, ConditionCode, MemoryOffset, MemoryOperand,
+        NoMatchingHint, RegClass, RegisterOperand,
     };
 
     fn x(code: u8) -> Operand {
@@ -329,6 +330,49 @@ mod tests {
         let umull = encode("umull", &[x(15), w(16), w(17)]).expect("umull alias should encode");
         let umaddl = encode("umaddl", &[x(15), w(16), w(17), x(31)]).expect("canonical umaddl");
         assert_eq!(umull.unpack(), umaddl.unpack(), "umull alias mismatch");
+    }
+
+    #[test]
+    fn encode_mnemonic_id_applies_scalar_mul_long_alias_fallback() {
+        let smull_id = generated::mnemonic_id_from_str("smull").expect("smull mnemonic id");
+        let smull = encode_mnemonic_id(smull_id, &[x(1), w(2), w(3)])
+            .expect("smull mnemonic-id path should encode via alias fallback");
+        let smaddl = encode("smaddl", &[x(1), w(2), w(3), x(31)]).expect("canonical smaddl");
+        assert_eq!(smull.unpack(), smaddl.unpack(), "smull fallback mismatch");
+
+        let umull_id = generated::mnemonic_id_from_str("umull").expect("umull mnemonic id");
+        let umull = encode_mnemonic_id(umull_id, &[x(4), w(5), w(6)])
+            .expect("umull mnemonic-id path should encode via alias fallback");
+        let umaddl = encode("umaddl", &[x(4), w(5), w(6), x(31)]).expect("canonical umaddl");
+        assert_eq!(umull.unpack(), umaddl.unpack(), "umull fallback mismatch");
+    }
+
+    #[test]
+    fn encode_supports_scalar_shift_immediate_alias_family() {
+        let lsl = encode("lsl", &[x(0), x(1), imm(5)]).expect("lsl immediate alias should encode");
+        let lsl_expected = encode("ubfm", &[x(0), x(1), imm(59), imm(58)]).expect("canonical ubfm");
+        assert_eq!(lsl.unpack(), lsl_expected.unpack(), "lsl alias mismatch");
+
+        let lsr = encode("lsr", &[w(2), w(3), imm(7)]).expect("lsr immediate alias should encode");
+        let lsr_expected = encode("ubfm", &[w(2), w(3), imm(7), imm(31)]).expect("canonical ubfm");
+        assert_eq!(lsr.unpack(), lsr_expected.unpack(), "lsr alias mismatch");
+
+        let asr = encode("asr", &[x(4), x(5), imm(13)]).expect("asr immediate alias should encode");
+        let asr_expected = encode("sbfm", &[x(4), x(5), imm(13), imm(63)]).expect("canonical sbfm");
+        assert_eq!(asr.unpack(), asr_expected.unpack(), "asr alias mismatch");
+    }
+
+    #[test]
+    fn scalar_shift_immediate_alias_reports_range_error() {
+        let err = encode("lsl", &[x(0), x(1), imm(64)]).expect_err("shift 64 must be rejected");
+        assert!(matches!(
+            err,
+            EncodeError::NoMatchingVariantHint {
+                hint: NoMatchingHint::Alias(AliasNoMatchHint::ShiftImmediateAmountOutOfRange {
+                    bits: 64
+                })
+            }
+        ));
     }
 
     #[test]
