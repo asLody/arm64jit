@@ -283,6 +283,7 @@ pub(crate) fn lookup_direct_variant_id(mnemonic_id: u16, args: &[JitArg]) -> Opt
 #[cfg(test)]
 mod tests {
     use super::lookup_mnemonic_id;
+    use crate::rules::generated::lookup_alias_rule;
 
     #[test]
     fn lookup_mnemonic_id_resolves_aliases_to_canonical_ids() {
@@ -290,5 +291,29 @@ mod tests {
         assert_eq!(lookup_mnemonic_id("bfxil"), lookup_mnemonic_id("bfm"));
         assert_eq!(lookup_mnemonic_id("sbfiz"), lookup_mnemonic_id("sbfm"));
         assert_eq!(lookup_mnemonic_id("stsetl"), lookup_mnemonic_id("ldsetl"));
+    }
+
+    #[test]
+    fn bitfield_extract_fixed_alias_rules_exist_in_macro_table() {
+        let sxtb = lookup_alias_rule("sxtb").expect("missing sxtb alias rule");
+        let sxth = lookup_alias_rule("sxth").expect("missing sxth alias rule");
+        let sxtw = lookup_alias_rule("sxtw").expect("missing sxtw alias rule");
+        let uxtb = lookup_alias_rule("uxtb").expect("missing uxtb alias rule");
+        let uxth = lookup_alias_rule("uxth").expect("missing uxth alias rule");
+        let uxtw = lookup_alias_rule("uxtw").expect("missing uxtw alias rule");
+
+        assert_eq!(sxtb.canonical, "sbfm");
+        assert_eq!(sxth.canonical, "sbfm");
+        assert_eq!(sxtw.canonical, "sbfm");
+        assert_eq!(uxtb.canonical, "ubfm");
+        assert_eq!(uxth.canonical, "ubfm");
+        assert_eq!(uxtw.canonical, "ubfm");
+
+        assert_eq!(sxtb.fixed_imms, 7);
+        assert_eq!(sxth.fixed_imms, 15);
+        assert_eq!(sxtw.fixed_imms, 31);
+        assert_eq!(uxtb.fixed_imms, 7);
+        assert_eq!(uxth.fixed_imms, 15);
+        assert_eq!(uxtw.fixed_imms, 31);
     }
 }

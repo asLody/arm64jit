@@ -1,7 +1,7 @@
 use arm64jit::__private::{
     BitFieldSpec, ConditionCode, EncodingSpec, ExtendKind, ExtendOperand, Operand,
     OperandConstraintKind, RegClass, RegisterOperand, SPECS, ShiftKind, ShiftOperand,
-    VectorArrangement, encode,
+    SplitImmediateKindSpec, VectorArrangement, encode,
 };
 use jit_core::{EncodeError, encode_by_spec, encode_by_spec_operands};
 
@@ -28,38 +28,21 @@ fn sample_structured_value(field: BitFieldSpec) -> i64 {
     0
 }
 
-fn semantic_field_name(name: &'static str) -> &'static str {
-    let Some((base, suffix)) = name.rsplit_once('_') else {
-        return name;
+fn split_immediate_info_at_slot(spec: &EncodingSpec, slot: usize) -> Option<(usize, i64)> {
+    let plan = spec.split_immediate_plan?;
+    if usize::from(plan.first_slot) != slot {
+        return None;
+    }
+    let second = usize::from(plan.second_slot);
+    if second < slot {
+        return None;
+    }
+    let sample = match plan.kind {
+        SplitImmediateKindSpec::AdrLike { .. } | SplitImmediateKindSpec::BitIndex6 { .. } => 0,
+        SplitImmediateKindSpec::LogicalImmRs { .. }
+        | SplitImmediateKindSpec::LogicalImmNrs { .. } => 1,
     };
-    if suffix.chars().all(|ch| ch.is_ascii_digit()) {
-        return base;
-    }
-    name
-}
-
-fn has_split_immediate_pair(spec: &EncodingSpec, slot: usize) -> bool {
-    if slot + 1 >= spec.operand_order.len() {
-        return false;
-    }
-    if spec.operand_kinds[slot] != OperandConstraintKind::Immediate
-        || spec.operand_kinds[slot + 1] != OperandConstraintKind::Immediate
-    {
-        return false;
-    }
-
-    let lhs_field_idx = spec.operand_order[slot] as usize;
-    let rhs_field_idx = spec.operand_order[slot + 1] as usize;
-    if lhs_field_idx >= spec.fields.len() || rhs_field_idx >= spec.fields.len() {
-        return false;
-    }
-
-    let lhs = semantic_field_name(spec.fields[lhs_field_idx].name);
-    let rhs = semantic_field_name(spec.fields[rhs_field_idx].name);
-    (lhs.eq_ignore_ascii_case("immlo") && rhs.eq_ignore_ascii_case("immhi"))
-        || (lhs.eq_ignore_ascii_case("immhi") && rhs.eq_ignore_ascii_case("immlo"))
-        || (lhs.eq_ignore_ascii_case("b5") && rhs.eq_ignore_ascii_case("b40"))
-        || (lhs.eq_ignore_ascii_case("b40") && rhs.eq_ignore_ascii_case("b5"))
+    Some((second - slot + 1, sample))
 }
 
 fn sample_register_for_kind(
@@ -107,9 +90,9 @@ fn sample_structured_operands(spec: &EncodingSpec) -> Vec<Operand> {
     let mut out = Vec::new();
     let mut slot = 0usize;
     while slot < spec.operand_order.len() {
-        if has_split_immediate_pair(spec, slot) {
-            out.push(Operand::Immediate(0));
-            slot += 2;
+        if let Some((span, sample)) = split_immediate_info_at_slot(spec, slot) {
+            out.push(Operand::Immediate(sample));
+            slot += span;
             continue;
         }
 
