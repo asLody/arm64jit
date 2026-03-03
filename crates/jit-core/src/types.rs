@@ -550,6 +550,14 @@ pub enum AliasNoMatchHint {
     MulDestinationMustBeDataGpr,
     /// `mul` sources must be data GPRs matching destination width.
     MulSourcesMustMatchDestinationWidth,
+    /// `ror` alias expects exactly three operands.
+    RorNeedsExactlyThreeOperands,
+    /// `ror` destination must be a data GPR (`Wn`/`Xn`).
+    RorDestinationMustBeDataGpr,
+    /// `ror` source must match destination width in data GPR class.
+    RorSourceMustMatchDestinationWidth,
+    /// `ror` shift must be immediate or same-width data GPR register.
+    RorShiftMustBeImmediateOrMatchingRegister,
     /// `mvn` operand form is invalid.
     MvnOperandFormInvalid,
     /// `mvn` destination must be a GPR.
@@ -870,6 +878,27 @@ fn write_no_matching_hint(hint: &NoMatchingHint, f: &mut fmt::Formatter<'_>) -> 
             write!(
                 f,
                 "mul source registers must be data general-purpose registers matching destination width"
+            )
+        }
+        NoMatchingHint::Alias(AliasNoMatchHint::RorNeedsExactlyThreeOperands) => {
+            write!(f, "ror alias expects exactly three operands")
+        }
+        NoMatchingHint::Alias(AliasNoMatchHint::RorDestinationMustBeDataGpr) => {
+            write!(
+                f,
+                "ror destination must be a data general-purpose register (Wn/Xn)"
+            )
+        }
+        NoMatchingHint::Alias(AliasNoMatchHint::RorSourceMustMatchDestinationWidth) => {
+            write!(
+                f,
+                "ror source register must be a data general-purpose register matching destination width"
+            )
+        }
+        NoMatchingHint::Alias(AliasNoMatchHint::RorShiftMustBeImmediateOrMatchingRegister) => {
+            write!(
+                f,
+                "ror third operand must be an immediate shift or same-width data general-purpose register"
             )
         }
         NoMatchingHint::Alias(AliasNoMatchHint::MvnOperandFormInvalid) => write!(

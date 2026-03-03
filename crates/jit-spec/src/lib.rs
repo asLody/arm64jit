@@ -430,8 +430,7 @@ fn collect_identifier_nodes(node: &serde_json::Value, out: &mut BTreeSet<String>
 fn is_register_semantic_field_name(name: &str) -> bool {
     matches!(
         name,
-        "ra"
-            | "rd"
+        "ra" | "rd"
             | "rdn"
             | "rm"
             | "rn"

@@ -500,6 +500,43 @@ fn block_supports_non_lsl_shifted_register_forms() {
 }
 
 #[test]
+fn block_supports_ror_alias_mnemonic() {
+    let mut storage = [0u32; 4];
+    let mut ops = CodeWriter::new(&mut storage);
+    let xd = 0u8;
+    let xn = 1u8;
+    let xm = 2u8;
+
+    jit!(ops
+        ; ror X(xd), X(xn), #7
+        ; ror x3, x4, x5
+        ; ror X(xd), X(xn), X(xm)
+    )
+    .expect("ror alias mnemonic should normalize and encode");
+
+    let code = emitted(&ops);
+    assert_eq!(ops.pos(), 3);
+    assert_eq!(
+        word_at(&code, 0),
+        encode("extr", &[x(xd), x(xn), x(xn), imm(7)])
+            .expect("canonical extr")
+            .unpack()
+    );
+    assert_eq!(
+        word_at(&code, 1),
+        encode("rorv", &[x(3), x(4), x(5)])
+            .expect("canonical rorv")
+            .unpack()
+    );
+    assert_eq!(
+        word_at(&code, 2),
+        encode("rorv", &[x(xd), x(xn), x(xm)])
+            .expect("canonical rorv dynamic")
+            .unpack()
+    );
+}
+
+#[test]
 fn block_supports_scalar_mul_alias_family() {
     let mut storage = [0u32; 8];
     let mut ops = CodeWriter::new(&mut storage);

@@ -15,6 +15,7 @@ enum AliasTransform {
     TstLike,
     MovLike,
     MulLike,
+    RorLike,
     MvnLike,
     SmullLike,
     UmullLike,
@@ -375,6 +376,71 @@ pub(crate) fn canonicalize_alias<'a>(
                 rule.canonical,
                 &scratch[..4],
             ))
+        }
+        AliasTransform::RorLike => {
+            if operands.len() != 3 {
+                return Err(alias_hint(AliasNoMatchHint::RorNeedsExactlyThreeOperands));
+            }
+
+            let rd =
+                require_gpr_register(operands[0], AliasNoMatchHint::RorDestinationMustBeDataGpr)?;
+            let rn = require_gpr_register(
+                operands[1],
+                AliasNoMatchHint::RorSourceMustMatchDestinationWidth,
+            )?;
+            let Some(data_class) = gpr_data_class(rd.class) else {
+                return Err(alias_hint(AliasNoMatchHint::RorDestinationMustBeDataGpr));
+            };
+            if gpr_data_class(rn.class) != Some(data_class) {
+                return Err(alias_hint(
+                    AliasNoMatchHint::RorSourceMustMatchDestinationWidth,
+                ));
+            }
+
+            match operands[2] {
+                Operand::Immediate(shift) => {
+                    scratch[0] = Operand::Register(RegisterOperand {
+                        class: data_class,
+                        ..rd
+                    });
+                    scratch[1] = Operand::Register(RegisterOperand {
+                        class: data_class,
+                        ..rn
+                    });
+                    scratch[2] = Operand::Register(RegisterOperand {
+                        class: data_class,
+                        ..rn
+                    });
+                    scratch[3] = Operand::Immediate(shift);
+                    Ok((
+                        Some(MnemonicId(rule.canonical_id)),
+                        rule.canonical,
+                        &scratch[..4],
+                    ))
+                }
+                Operand::Register(rm) if gpr_data_class(rm.class) == Some(data_class) => {
+                    scratch[0] = Operand::Register(RegisterOperand {
+                        class: data_class,
+                        ..rd
+                    });
+                    scratch[1] = Operand::Register(RegisterOperand {
+                        class: data_class,
+                        ..rn
+                    });
+                    scratch[2] = Operand::Register(RegisterOperand {
+                        class: data_class,
+                        ..rm
+                    });
+                    Ok((
+                        crate::generated::mnemonic_id_from_str("rorv"),
+                        "rorv",
+                        &scratch[..3],
+                    ))
+                }
+                _ => Err(alias_hint(
+                    AliasNoMatchHint::RorShiftMustBeImmediateOrMatchingRegister,
+                )),
+            }
         }
         AliasTransform::MvnLike => {
             if operands.len() < 2 || operands.len() > 3 {
@@ -780,5 +846,6 @@ mod tests {
         assert_eq!(alias_canonical_mnemonic("mul"), Some("madd"));
         assert_eq!(alias_canonical_mnemonic("smull"), Some("smaddl"));
         assert_eq!(alias_canonical_mnemonic("umull"), Some("umaddl"));
+        assert_eq!(alias_canonical_mnemonic("ror"), Some("extr"));
     }
 }

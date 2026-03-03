@@ -332,6 +332,25 @@ mod tests {
     }
 
     #[test]
+    fn encode_supports_ror_alias_family() {
+        let ror_imm = encode("ror", &[x(0), x(1), imm(7)]).expect("ror imm alias should encode");
+        let extr = encode("extr", &[x(0), x(1), x(1), imm(7)]).expect("canonical extr");
+        assert_eq!(
+            ror_imm.unpack(),
+            extr.unpack(),
+            "ror immediate alias mismatch"
+        );
+
+        let ror_reg = encode("ror", &[x(2), x(3), x(4)]).expect("ror register alias should encode");
+        let rorv = encode("rorv", &[x(2), x(3), x(4)]).expect("canonical rorv");
+        assert_eq!(
+            ror_reg.unpack(),
+            rorv.unpack(),
+            "ror register alias mismatch"
+        );
+    }
+
+    #[test]
     fn memory_addressing_contributes_to_shape_keys() {
         let offset = [
             x(0),

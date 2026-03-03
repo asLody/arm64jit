@@ -127,6 +127,13 @@ pub(crate) static ALIAS_RULES: &[AliasRule] = &[
         fixed_imms: -1,
     },
     AliasRule {
+        alias: "ror",
+        canonical: "extr",
+        canonical_id: 361,
+        transform: AliasTransform::RorLike,
+        fixed_imms: -1,
+    },
+    AliasRule {
         alias: "sbfiz",
         canonical: "sbfm",
         canonical_id: 1019,

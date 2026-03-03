@@ -96,6 +96,7 @@ fn transform_variant_name(name: &str) -> Result<&'static str, Box<dyn std::error
         "tst_like" => Ok("TstLike"),
         "mov_like" => Ok("MovLike"),
         "mul_like" => Ok("MulLike"),
+        "ror_like" => Ok("RorLike"),
         "mvn_like" => Ok("MvnLike"),
         "smull_like" => Ok("SmullLike"),
         "umull_like" => Ok("UmullLike"),

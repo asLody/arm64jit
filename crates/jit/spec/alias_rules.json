@@ -9,6 +9,7 @@
   { "alias": "mvn", "canonical": "eon", "transform": "mvn_like" },
   { "alias": "smull", "canonical": "smaddl", "transform": "smull_like" },
   { "alias": "umull", "canonical": "umaddl", "transform": "umull_like" },
+  { "alias": "ror", "canonical": "extr", "transform": "ror_like" },
 
   { "alias": "cinc", "canonical": "csinc", "transform": "cinc_like" },
   { "alias": "cset", "canonical": "csinc", "transform": "cset_like" },

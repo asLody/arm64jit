@@ -291,6 +291,7 @@ mod tests {
         assert_eq!(lookup_mnemonic_id("bfxil"), lookup_mnemonic_id("bfm"));
         assert_eq!(lookup_mnemonic_id("sbfiz"), lookup_mnemonic_id("sbfm"));
         assert_eq!(lookup_mnemonic_id("stsetl"), lookup_mnemonic_id("ldsetl"));
+        assert_eq!(lookup_mnemonic_id("ror"), lookup_mnemonic_id("extr"));
     }
 
     #[test]
@@ -320,10 +321,12 @@ mod tests {
     #[test]
     fn scalar_mul_family_alias_rules_exist_in_macro_table() {
         let mul = lookup_alias_rule("mul").expect("missing mul alias rule");
+        let ror = lookup_alias_rule("ror").expect("missing ror alias rule");
         let smull = lookup_alias_rule("smull").expect("missing smull alias rule");
         let umull = lookup_alias_rule("umull").expect("missing umull alias rule");
 
         assert_eq!(mul.canonical, "madd");
+        assert_eq!(ror.canonical, "extr");
         assert_eq!(smull.canonical, "smaddl");
         assert_eq!(umull.canonical, "umaddl");
     }
