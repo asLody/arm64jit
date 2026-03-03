@@ -317,6 +317,21 @@ mod tests {
     }
 
     #[test]
+    fn encode_supports_scalar_mul_alias_family() {
+        let mul = encode("mul", &[x(9), x(10), x(11)]).expect("mul alias should encode");
+        let madd = encode("madd", &[x(9), x(10), x(11), x(31)]).expect("canonical madd");
+        assert_eq!(mul.unpack(), madd.unpack(), "mul alias mismatch");
+
+        let smull = encode("smull", &[x(12), w(13), w(14)]).expect("smull alias should encode");
+        let smaddl = encode("smaddl", &[x(12), w(13), w(14), x(31)]).expect("canonical smaddl");
+        assert_eq!(smull.unpack(), smaddl.unpack(), "smull alias mismatch");
+
+        let umull = encode("umull", &[x(15), w(16), w(17)]).expect("umull alias should encode");
+        let umaddl = encode("umaddl", &[x(15), w(16), w(17), x(31)]).expect("canonical umaddl");
+        assert_eq!(umull.unpack(), umaddl.unpack(), "umull alias mismatch");
+    }
+
+    #[test]
     fn memory_addressing_contributes_to_shape_keys() {
         let offset = [
             x(0),

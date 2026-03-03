@@ -14,7 +14,10 @@ enum AliasTransform {
     CmnLike,
     TstLike,
     MovLike,
+    MulLike,
     MvnLike,
+    SmullLike,
+    UmullLike,
     CincLike,
     CsetLike,
     CnegLike,
@@ -324,6 +327,55 @@ pub(crate) fn canonicalize_alias<'a>(
                 &scratch[..3],
             ))
         }
+        AliasTransform::MulLike => {
+            if operands.len() != 3 {
+                return Err(alias_hint(AliasNoMatchHint::MulNeedsExactlyThreeOperands));
+            }
+
+            let rd =
+                require_gpr_register(operands[0], AliasNoMatchHint::MulDestinationMustBeDataGpr)?;
+            let rn = require_gpr_register(
+                operands[1],
+                AliasNoMatchHint::MulSourcesMustMatchDestinationWidth,
+            )?;
+            let rm = require_gpr_register(
+                operands[2],
+                AliasNoMatchHint::MulSourcesMustMatchDestinationWidth,
+            )?;
+
+            let Some(data_class) = gpr_data_class(rd.class) else {
+                return Err(alias_hint(AliasNoMatchHint::MulDestinationMustBeDataGpr));
+            };
+            if gpr_data_class(rn.class) != Some(data_class)
+                || gpr_data_class(rm.class) != Some(data_class)
+            {
+                return Err(alias_hint(
+                    AliasNoMatchHint::MulSourcesMustMatchDestinationWidth,
+                ));
+            }
+            let Some(zero) = zero_register_for_class(data_class) else {
+                return Err(alias_hint(AliasNoMatchHint::MulDestinationMustBeDataGpr));
+            };
+
+            scratch[0] = Operand::Register(RegisterOperand {
+                class: data_class,
+                ..rd
+            });
+            scratch[1] = Operand::Register(RegisterOperand {
+                class: data_class,
+                ..rn
+            });
+            scratch[2] = Operand::Register(RegisterOperand {
+                class: data_class,
+                ..rm
+            });
+            scratch[3] = Operand::Register(zero);
+            Ok((
+                Some(MnemonicId(rule.canonical_id)),
+                rule.canonical,
+                &scratch[..4],
+            ))
+        }
         AliasTransform::MvnLike => {
             if operands.len() < 2 || operands.len() > 3 {
                 return Err(alias_hint(AliasNoMatchHint::MvnOperandFormInvalid));
@@ -595,6 +647,48 @@ pub(crate) fn canonicalize_alias<'a>(
                 &scratch[..3],
             ))
         }
+        AliasTransform::SmullLike | AliasTransform::UmullLike => {
+            if operands.len() != 3 {
+                return Err(alias_hint(
+                    AliasNoMatchHint::MAddLongNeedsExactlyThreeOperands,
+                ));
+            }
+            let rd =
+                require_gpr_register(operands[0], AliasNoMatchHint::MAddLongDestinationMustBeX)?;
+            let rn = require_gpr_register(operands[1], AliasNoMatchHint::MAddLongSourcesMustBeW)?;
+            let rm = require_gpr_register(operands[2], AliasNoMatchHint::MAddLongSourcesMustBeW)?;
+
+            if gpr_data_class(rd.class) != Some(RegClass::X) {
+                return Err(alias_hint(AliasNoMatchHint::MAddLongDestinationMustBeX));
+            }
+            if gpr_data_class(rn.class) != Some(RegClass::W)
+                || gpr_data_class(rm.class) != Some(RegClass::W)
+            {
+                return Err(alias_hint(AliasNoMatchHint::MAddLongSourcesMustBeW));
+            }
+
+            let Some(zero) = zero_register_for_class(RegClass::X) else {
+                return Err(alias_hint(AliasNoMatchHint::MAddLongDestinationMustBeX));
+            };
+            scratch[0] = Operand::Register(RegisterOperand {
+                class: RegClass::X,
+                ..rd
+            });
+            scratch[1] = Operand::Register(RegisterOperand {
+                class: RegClass::W,
+                ..rn
+            });
+            scratch[2] = Operand::Register(RegisterOperand {
+                class: RegClass::W,
+                ..rm
+            });
+            scratch[3] = Operand::Register(zero);
+            Ok((
+                Some(MnemonicId(rule.canonical_id)),
+                rule.canonical,
+                &scratch[..4],
+            ))
+        }
         AliasTransform::DcLike => {
             if operands.len() != 2 {
                 return Err(alias_hint(AliasNoMatchHint::DcNeedsExactlyTwoOperands));
@@ -679,5 +773,12 @@ mod tests {
                 "unexpected canonical mapping for {mnemonic}"
             );
         }
+    }
+
+    #[test]
+    fn scalar_mul_family_aliases_are_registered() {
+        assert_eq!(alias_canonical_mnemonic("mul"), Some("madd"));
+        assert_eq!(alias_canonical_mnemonic("smull"), Some("smaddl"));
+        assert_eq!(alias_canonical_mnemonic("umull"), Some("umaddl"));
     }
 }

@@ -16,8 +16,11 @@ fn is_sysreg_arg(arg: &JitArg) -> bool {
     matches!(arg, JitArg::Operand(OperandAst::SysReg(_)))
 }
 
-fn arg_immediate_zero() -> JitArg {
-    JitArg::Operand(OperandAst::Immediate(parse_quote!(0)))
+fn arg_lsl_shift_zero() -> JitArg {
+    JitArg::Operand(OperandAst::Shift {
+        kind: ShiftKindAst::Lsl,
+        amount: Some(parse_quote!(0)),
+    })
 }
 
 fn is_conditional_branch_alias_mnemonic(mnemonic: &str) -> bool {
@@ -79,18 +82,22 @@ pub(crate) fn normalize_instruction_stmt(mut inst: InstructionStmt) -> Result<In
         && inst.args[..3].iter().all(is_gpr_register_arg)
     {
         if inst.args.len() == 3 {
-            inst.args.push(arg_immediate_zero());
+            inst.args.push(arg_lsl_shift_zero());
         } else if inst.args.len() == 4
             && let JitArg::Operand(OperandAst::Shift { kind, amount }) = &inst.args[3]
         {
-            if *kind != ShiftKindAst::Lsl {
-                return Err(syn::Error::new(
-                    proc_macro2::Span::call_site(),
-                    "register-shift form only supports lsl shift in this syntax",
-                ));
-            }
             let amount = amount.clone().unwrap_or_else(|| parse_quote!(0));
-            inst.args[3] = JitArg::Operand(OperandAst::Immediate(amount));
+            inst.args[3] = JitArg::Operand(OperandAst::Shift {
+                kind: *kind,
+                amount: Some(amount),
+            });
+        } else if inst.args.len() == 4
+            && let JitArg::Operand(OperandAst::Immediate(amount)) = &inst.args[3]
+        {
+            inst.args[3] = JitArg::Operand(OperandAst::Shift {
+                kind: ShiftKindAst::Lsl,
+                amount: Some(amount.clone()),
+            });
         }
     }
 

@@ -316,4 +316,15 @@ mod tests {
         assert_eq!(uxth.fixed_imms, 15);
         assert_eq!(uxtw.fixed_imms, 31);
     }
+
+    #[test]
+    fn scalar_mul_family_alias_rules_exist_in_macro_table() {
+        let mul = lookup_alias_rule("mul").expect("missing mul alias rule");
+        let smull = lookup_alias_rule("smull").expect("missing smull alias rule");
+        let umull = lookup_alias_rule("umull").expect("missing umull alias rule");
+
+        assert_eq!(mul.canonical, "madd");
+        assert_eq!(smull.canonical, "smaddl");
+        assert_eq!(umull.canonical, "umaddl");
+    }
 }

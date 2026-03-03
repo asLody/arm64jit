@@ -544,6 +544,12 @@ pub enum AliasNoMatchHint {
     MovDestinationMustBeGpr,
     /// `mov` source must be GPR or zero immediate.
     MovSourceMustBeGprOrZero,
+    /// `mul` alias expects exactly three operands.
+    MulNeedsExactlyThreeOperands,
+    /// `mul` destination must be a data GPR (`Wn`/`Xn`).
+    MulDestinationMustBeDataGpr,
+    /// `mul` sources must be data GPRs matching destination width.
+    MulSourcesMustMatchDestinationWidth,
     /// `mvn` operand form is invalid.
     MvnOperandFormInvalid,
     /// `mvn` destination must be a GPR.
@@ -614,6 +620,12 @@ pub enum AliasNoMatchHint {
     StsetlMemoryBaseMustBeGpr,
     /// `stsetl` second operand form is invalid.
     StsetlSecondOperandInvalid,
+    /// `smull`/`umull` alias expects exactly three operands.
+    MAddLongNeedsExactlyThreeOperands,
+    /// `smull`/`umull` destination must be 64-bit data GPR (`Xd`).
+    MAddLongDestinationMustBeX,
+    /// `smull`/`umull` sources must be 32-bit data GPRs (`Wn`, `Wm`).
+    MAddLongSourcesMustBeW,
     /// `dc` expects exactly two operands.
     DcNeedsExactlyTwoOperands,
     /// `dc` first operand must be immediate subop.
@@ -845,6 +857,21 @@ fn write_no_matching_hint(hint: &NoMatchingHint, f: &mut fmt::Formatter<'_>) -> 
         NoMatchingHint::Alias(AliasNoMatchHint::MovSourceMustBeGprOrZero) => {
             write!(f, "mov source must be a general-purpose register or #0")
         }
+        NoMatchingHint::Alias(AliasNoMatchHint::MulNeedsExactlyThreeOperands) => {
+            write!(f, "mul alias expects exactly three operands")
+        }
+        NoMatchingHint::Alias(AliasNoMatchHint::MulDestinationMustBeDataGpr) => {
+            write!(
+                f,
+                "mul destination must be a data general-purpose register (Wn/Xn)"
+            )
+        }
+        NoMatchingHint::Alias(AliasNoMatchHint::MulSourcesMustMatchDestinationWidth) => {
+            write!(
+                f,
+                "mul source registers must be data general-purpose registers matching destination width"
+            )
+        }
         NoMatchingHint::Alias(AliasNoMatchHint::MvnOperandFormInvalid) => write!(
             f,
             "mvn expects two operands or three operands with an optional lsl shift amount"
@@ -958,6 +985,15 @@ fn write_no_matching_hint(hint: &NoMatchingHint, f: &mut fmt::Formatter<'_>) -> 
         }
         NoMatchingHint::Alias(AliasNoMatchHint::StsetlSecondOperandInvalid) => {
             write!(f, "stsetl expects stsetl <rs>, <rn> or stsetl <rs>, [<rn>]")
+        }
+        NoMatchingHint::Alias(AliasNoMatchHint::MAddLongNeedsExactlyThreeOperands) => {
+            write!(f, "smull/umull alias expects exactly three operands")
+        }
+        NoMatchingHint::Alias(AliasNoMatchHint::MAddLongDestinationMustBeX) => {
+            write!(f, "smull/umull destination must be a 64-bit register (Xd)")
+        }
+        NoMatchingHint::Alias(AliasNoMatchHint::MAddLongSourcesMustBeW) => {
+            write!(f, "smull/umull sources must be 32-bit registers (Wn, Wm)")
         }
         NoMatchingHint::Alias(AliasNoMatchHint::DcNeedsExactlyTwoOperands) => {
             write!(f, "dc expects exactly two operands: #<subop>, <rt>")

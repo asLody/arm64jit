@@ -1,6 +1,6 @@
 use arm64jit::__private::{
     AddressingMode, ConditionCode, EncodeError, MemoryOffset, MemoryOperand, Operand, RegClass,
-    RegisterOperand, emit_mov_imm_auto, encode,
+    RegisterOperand, ShiftKind, ShiftOperand, emit_mov_imm_auto, encode,
 };
 use arm64jit::{AssembleError, CodeWriter, jit};
 
@@ -36,6 +36,10 @@ fn x(code: u8) -> Operand {
 
 fn imm(value: i64) -> Operand {
     Operand::Immediate(value)
+}
+
+fn shift(kind: ShiftKind, amount: u8) -> Operand {
+    Operand::Shift(ShiftOperand { kind, amount })
 }
 
 fn mem_x(base: u8) -> Operand {
@@ -449,14 +453,88 @@ fn block_normalizes_addsub_register_shift_forms() {
     assert_eq!(ops.pos(), 2);
     assert_eq!(
         word_at(&code, 0),
-        encode("add", &[x(28), x(28), x(0), imm(0)])
+        encode("add", &[x(28), x(28), x(0), shift(ShiftKind::Lsl, 0)])
             .expect("add shifted register")
             .unpack()
     );
     assert_eq!(
         word_at(&code, 1),
-        encode("sub", &[x(3), x(4), x(5), imm(7)])
+        encode("sub", &[x(3), x(4), x(5), shift(ShiftKind::Lsl, 7)])
             .expect("sub shifted register")
+            .unpack()
+    );
+}
+
+#[test]
+fn block_supports_non_lsl_shifted_register_forms() {
+    let mut storage = [0u32; 4];
+    let mut ops = CodeWriter::new(&mut storage);
+
+    jit!(ops
+        ; eor x0, x0, x1, lsr #3
+        ; eor x2, x2, x3, asr #5
+        ; eor x4, x4, x5, ror #7
+    )
+    .expect("eor shifted-register forms with lsr/asr/ror should encode");
+
+    let code = emitted(&ops);
+    assert_eq!(ops.pos(), 3);
+    assert_eq!(
+        word_at(&code, 0),
+        encode("eor", &[x(0), x(0), x(1), shift(ShiftKind::Lsr, 3)])
+            .expect("eor lsr")
+            .unpack()
+    );
+    assert_eq!(
+        word_at(&code, 1),
+        encode("eor", &[x(2), x(2), x(3), shift(ShiftKind::Asr, 5)])
+            .expect("eor asr")
+            .unpack()
+    );
+    assert_eq!(
+        word_at(&code, 2),
+        encode("eor", &[x(4), x(4), x(5), shift(ShiftKind::Ror, 7)])
+            .expect("eor ror")
+            .unpack()
+    );
+}
+
+#[test]
+fn block_supports_scalar_mul_alias_family() {
+    let mut storage = [0u32; 8];
+    let mut ops = CodeWriter::new(&mut storage);
+    let xd = 0u8;
+    let xn = 1u8;
+    let xm = 2u8;
+    let wd = 3u8;
+    let wn = 4u8;
+    let wm = 5u8;
+
+    jit!(ops
+        ; mul X(xd), X(xn), X(xm)
+        ; smull X(wd), W(wn), W(wm)
+        ; umull x6, w7, w8
+    )
+    .expect("scalar mul/smull/umull aliases should encode");
+
+    let code = emitted(&ops);
+    assert_eq!(ops.pos(), 3);
+    assert_eq!(
+        word_at(&code, 0),
+        encode("madd", &[x(xd), x(xn), x(xm), x(31)])
+            .expect("canonical madd")
+            .unpack()
+    );
+    assert_eq!(
+        word_at(&code, 1),
+        encode("smaddl", &[x(wd), w(wn), w(wm), x(31)])
+            .expect("canonical smaddl")
+            .unpack()
+    );
+    assert_eq!(
+        word_at(&code, 2),
+        encode("umaddl", &[x(6), w(7), w(8), x(31)])
+            .expect("canonical umaddl")
             .unpack()
     );
 }

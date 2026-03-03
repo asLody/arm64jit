@@ -5,7 +5,10 @@
   { "alias": "cmn", "canonical": "adds", "transform": "cmn_like" },
   { "alias": "tst", "canonical": "ands", "transform": "tst_like" },
   { "alias": "mov", "canonical": "add", "transform": "mov_like" },
+  { "alias": "mul", "canonical": "madd", "transform": "mul_like" },
   { "alias": "mvn", "canonical": "eon", "transform": "mvn_like" },
+  { "alias": "smull", "canonical": "smaddl", "transform": "smull_like" },
+  { "alias": "umull", "canonical": "umaddl", "transform": "umull_like" },
 
   { "alias": "cinc", "canonical": "csinc", "transform": "cinc_like" },
   { "alias": "cset", "canonical": "csinc", "transform": "cset_like" },

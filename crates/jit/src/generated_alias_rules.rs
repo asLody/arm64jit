@@ -99,6 +99,13 @@ pub(crate) static ALIAS_RULES: &[AliasRule] = &[
         fixed_imms: -1,
     },
     AliasRule {
+        alias: "mul",
+        canonical: "madd",
+        canonical_id: 814,
+        transform: AliasTransform::MulLike,
+        fixed_imms: -1,
+    },
+    AliasRule {
         alias: "mvn",
         canonical: "eon",
         canonical_id: 346,
@@ -138,6 +145,13 @@ pub(crate) static ALIAS_RULES: &[AliasRule] = &[
         canonical: "shrn",
         canonical_id: 1085,
         transform: AliasTransform::PureRename,
+        fixed_imms: -1,
+    },
+    AliasRule {
+        alias: "smull",
+        canonical: "smaddl",
+        canonical_id: 1101,
+        transform: AliasTransform::SmullLike,
         fixed_imms: -1,
     },
     AliasRule {
@@ -229,6 +243,13 @@ pub(crate) static ALIAS_RULES: &[AliasRule] = &[
         canonical: "ubfm",
         canonical_id: 1389,
         transform: AliasTransform::BitfieldUbfx,
+        fixed_imms: -1,
+    },
+    AliasRule {
+        alias: "umull",
+        canonical: "umaddl",
+        canonical_id: 1400,
+        transform: AliasTransform::UmullLike,
         fixed_imms: -1,
     },
     AliasRule {

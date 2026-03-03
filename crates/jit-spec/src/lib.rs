@@ -12,7 +12,7 @@
 
 //! Parser and normalization for Arm AARCHMRS instruction specifications.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
 use std::path::Path;
 
@@ -217,6 +217,25 @@ pub struct FlatInstruction {
     pub fixed_value: u32,
     /// Ordered operands.
     pub fields: Vec<FlatField>,
+    /// Explicit register class hints extracted from `_meta.encoded_in`.
+    ///
+    /// Keys are normalized semantic field names (for example `rd`, `rn`, `vm`).
+    pub register_hints: BTreeMap<String, RegisterClassHint>,
+}
+
+/// Register class hint extracted from source metadata.
+#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum RegisterClassHint {
+    /// General-purpose 32-bit register class (`Wn` family).
+    Gpr32,
+    /// General-purpose 64-bit register class (`Xn` family).
+    Gpr64,
+    /// SIMD/FP vector register class (`Vn` family).
+    Simd,
+    /// SVE Z register class (`Zn` family).
+    SveZ,
+    /// Predicate register class (`Pn` family).
+    Predicate,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -282,6 +301,7 @@ fn walk_children<'a>(
             InstructionGroupOrInstruction::Instruction(instruction) => {
                 stack.push(&instruction.encoding);
                 path.push(instruction.name.as_str());
+                let register_hints = extract_register_hints(instruction.meta.as_ref());
 
                 let (mut fixed_mask, mut fixed_value, mut fields) = flatten_stack(stack)?;
                 if let Some(condition) = &instruction.condition {
@@ -300,6 +320,7 @@ fn walk_children<'a>(
                     fixed_mask,
                     fixed_value,
                     fields,
+                    register_hints,
                 });
 
                 path.pop();
@@ -333,6 +354,123 @@ fn semantic_field_name(field_name: &str) -> &str {
 
 fn has_semantic_field(fields: &[String], name: &str) -> bool {
     fields.iter().any(|field| field == name)
+}
+
+fn extract_register_hints(meta: Option<&serde_json::Value>) -> BTreeMap<String, RegisterClassHint> {
+    let Some(meta) = meta.and_then(serde_json::Value::as_object) else {
+        return BTreeMap::new();
+    };
+    let Some(encoded_in) = meta
+        .get("encoded_in")
+        .and_then(serde_json::Value::as_object)
+    else {
+        return BTreeMap::new();
+    };
+
+    let mut hints = BTreeMap::<String, RegisterClassHint>::new();
+    for (placeholder, expr) in encoded_in {
+        let Some(hint) = register_hint_from_placeholder(placeholder) else {
+            continue;
+        };
+        let mut identifiers = BTreeSet::<String>::new();
+        collect_identifier_nodes(expr, &mut identifiers);
+        for identifier in identifiers {
+            let normalized = identifier.to_ascii_lowercase();
+            let semantic = semantic_field_name(&normalized).to_owned();
+            if !is_register_semantic_field_name(&semantic) {
+                continue;
+            }
+            hints.insert(semantic, hint);
+        }
+    }
+    hints
+}
+
+fn register_hint_from_placeholder(placeholder: &str) -> Option<RegisterClassHint> {
+    let trimmed = placeholder
+        .trim()
+        .trim_start_matches('<')
+        .trim_end_matches('>');
+    let head = trimmed.split('|').next().unwrap_or(trimmed).trim();
+    let first = head.chars().next()?;
+    if !first.is_ascii_uppercase() {
+        return None;
+    }
+    match first {
+        'W' => Some(RegisterClassHint::Gpr32),
+        'X' => Some(RegisterClassHint::Gpr64),
+        'V' => Some(RegisterClassHint::Simd),
+        'Z' => Some(RegisterClassHint::SveZ),
+        'P' => Some(RegisterClassHint::Predicate),
+        _ => None,
+    }
+}
+
+fn collect_identifier_nodes(node: &serde_json::Value, out: &mut BTreeSet<String>) {
+    match node {
+        serde_json::Value::Object(obj) => {
+            if obj.get("_type").and_then(serde_json::Value::as_str) == Some("AST.Identifier")
+                && let Some(value) = obj.get("value").and_then(serde_json::Value::as_str)
+            {
+                out.insert(value.to_owned());
+            }
+            for value in obj.values() {
+                collect_identifier_nodes(value, out);
+            }
+        }
+        serde_json::Value::Array(values) => {
+            for value in values {
+                collect_identifier_nodes(value, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn is_register_semantic_field_name(name: &str) -> bool {
+    matches!(
+        name,
+        "ra"
+            | "rd"
+            | "rdn"
+            | "rm"
+            | "rn"
+            | "rs"
+            | "rt"
+            | "rt2"
+            | "rt3"
+            | "rt4"
+            | "rv"
+            | "vd"
+            | "vdn"
+            | "vm"
+            | "vn"
+            | "vt"
+            | "za"
+            | "zad"
+            | "zada"
+            | "zan"
+            | "zat"
+            | "zd"
+            | "zda"
+            | "zdn"
+            | "zk"
+            | "zm"
+            | "zn"
+            | "zt"
+            | "pd"
+            | "pdm"
+            | "pdn"
+            | "pg"
+            | "pm"
+            | "pn"
+            | "pnd"
+            | "png"
+            | "pnn"
+            | "pnv"
+            | "pt"
+            | "pv"
+    )
 }
 
 fn is_fixed_bit_pair(opcode: u32, opcode_mask: u32, hi: u8, lo: u8, accepted: &[(u8, u8)]) -> bool {
@@ -720,6 +858,9 @@ fn bit_positions(range: Range) -> impl Iterator<Item = u32> {
 /// Instruction entry (leaf).
 #[derive(Debug, Deserialize)]
 pub struct Instruction {
+    /// Optional source metadata.
+    #[serde(default, rename = "_meta")]
+    pub meta: Option<serde_json::Value>,
     /// Leaf encoding.
     pub encoding: Encodeset,
     /// Variant name.
@@ -800,5 +941,73 @@ mod tests {
         assert_eq!(add.fields[0].lsb, 22);
         assert_eq!(add.fields[1].name, "imm12");
         assert_eq!(add.fields[1].lsb, 10);
+        assert!(add.register_hints.is_empty());
+    }
+
+    #[test]
+    fn encoded_in_metadata_provides_register_class_hints() {
+        let sample = r#"
+{
+  "_meta": { "license": { "copyright": "x", "info": "x" } },
+  "instructions": [
+    {
+      "name": "A64",
+      "encoding": { "values": [] },
+      "children": [
+        {
+          "_type": "Instruction.InstructionGroup",
+          "name": "dp3src",
+          "encoding": { "values": [] },
+          "children": [
+            {
+              "_type": "Instruction.Instruction",
+              "_meta": {
+                "encoded_in": {
+                  "<Xd>": [{ "_type": "AST.Identifier", "value": "Rd" }],
+                  "<Xa>": [{ "_type": "AST.Identifier", "value": "Ra" }],
+                  "<Wn>": [{ "_type": "AST.Identifier", "value": "Rn" }],
+                  "<Wm>": [{ "_type": "AST.Identifier", "value": "Rm" }]
+                }
+              },
+              "name": "SMADDL_64WA_dp_3src",
+              "operation_id": "SMADDL",
+              "encoding": {
+                "values": [
+                  { "_type": "Instruction.Encodeset.Bits", "range": { "start": 21, "width": 3 }, "should_be_mask": { "value": "'000'" }, "value": { "value": "'001'" } },
+                  { "_type": "Instruction.Encodeset.Field", "name": "Rm", "range": { "start": 16, "width": 5 }, "should_be_mask": { "value": "'00000'" }, "value": { "value": "'xxxxx'" } },
+                  { "_type": "Instruction.Encodeset.Field", "name": "Ra", "range": { "start": 10, "width": 5 }, "should_be_mask": { "value": "'00000'" }, "value": { "value": "'xxxxx'" } },
+                  { "_type": "Instruction.Encodeset.Field", "name": "Rn", "range": { "start": 5, "width": 5 }, "should_be_mask": { "value": "'00000'" }, "value": { "value": "'xxxxx'" } },
+                  { "_type": "Instruction.Encodeset.Field", "name": "Rd", "range": { "start": 0, "width": 5 }, "should_be_mask": { "value": "'00000'" }, "value": { "value": "'xxxxx'" } }
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
+"#;
+
+        let doc = parse_instructions_json(sample).expect("parse should succeed");
+        let flat = flatten_instruction_set(&doc, "A64").expect("flatten should succeed");
+        assert_eq!(flat.len(), 1);
+        let inst = &flat[0];
+        assert_eq!(
+            inst.register_hints.get("rd"),
+            Some(&RegisterClassHint::Gpr64)
+        );
+        assert_eq!(
+            inst.register_hints.get("ra"),
+            Some(&RegisterClassHint::Gpr64)
+        );
+        assert_eq!(
+            inst.register_hints.get("rn"),
+            Some(&RegisterClassHint::Gpr32)
+        );
+        assert_eq!(
+            inst.register_hints.get("rm"),
+            Some(&RegisterClassHint::Gpr32)
+        );
     }
 }

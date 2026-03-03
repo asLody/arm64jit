@@ -3,7 +3,7 @@ use std::fmt::Write;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use jit_spec::{FlatField, FlatInstruction};
+use jit_spec::{FlatField, FlatInstruction, RegisterClassHint};
 use thiserror::Error;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -128,6 +128,7 @@ struct InstructionContext {
     opcode: u32,
     opcode_mask: u32,
     semantic_fields: Vec<String>,
+    register_hints: BTreeMap<String, RegisterClassHint>,
 }
 
 impl InstructionContext {
@@ -142,6 +143,7 @@ impl InstructionContext {
             opcode: inst.fixed_value,
             opcode_mask: inst.fixed_mask,
             semantic_fields,
+            register_hints: inst.register_hints.clone(),
         }
     }
 
@@ -151,6 +153,22 @@ impl InstructionContext {
             opcode,
             opcode_mask,
             semantic_fields,
+            register_hints: BTreeMap::new(),
+        }
+    }
+
+    #[cfg(test)]
+    fn from_semantic_fields_with_hints(
+        opcode: u32,
+        opcode_mask: u32,
+        semantic_fields: Vec<String>,
+        register_hints: BTreeMap<String, RegisterClassHint>,
+    ) -> Self {
+        Self {
+            opcode,
+            opcode_mask,
+            semantic_fields,
+            register_hints,
         }
     }
 
@@ -188,6 +206,17 @@ impl InstructionContext {
 
     fn memory_like(&self) -> bool {
         self.has_memory_base_data() && self.has_memory_offset_components()
+    }
+
+    fn register_hint_kind(&self, field_name: &str) -> Option<GeneratedOperandKind> {
+        let hint = self.register_hints.get(field_name).copied()?;
+        match hint {
+            RegisterClassHint::Gpr32 => Some(GeneratedOperandKind::Gpr32Register),
+            RegisterClassHint::Gpr64 => Some(GeneratedOperandKind::Gpr64Register),
+            RegisterClassHint::Simd => Some(GeneratedOperandKind::SimdRegister),
+            RegisterClassHint::SveZ => Some(GeneratedOperandKind::SveZRegister),
+            RegisterClassHint::Predicate => Some(GeneratedOperandKind::PredicateRegister),
+        }
     }
 }
 
@@ -1415,29 +1444,14 @@ fn variant_supports_shift_to_immediate_normalization(
     inst: &FlatInstruction,
 ) -> Result<bool, CodegenError> {
     let context = InstructionContext::from_instruction(inst);
-    let (_, kinds, implicit_defaults) = derive_operand_metadata(inst)?;
-    if kinds.len() != 4
+    let (_, kinds, _) = derive_operand_metadata(inst)?;
+    if kinds.len() != 5
         || !is_gpr_generated_kind(kinds[0])
         || !is_gpr_generated_kind(kinds[1])
         || !is_gpr_generated_kind(kinds[2])
-        || kinds[3] != GeneratedOperandKind::Immediate
+        || kinds[3] != GeneratedOperandKind::ShiftKind
+        || kinds[4] != GeneratedOperandKind::Immediate
     {
-        return Ok(false);
-    }
-
-    let has_shift_default = implicit_defaults.iter().any(|(field_index, value)| {
-        if *value != 0 {
-            return false;
-        }
-        let idx = *field_index as usize;
-        if idx >= inst.fields.len() {
-            return false;
-        }
-        let normalized = normalize_field_name(&inst.fields[idx].name);
-        semantic_field_name(&normalized) == "shift"
-    });
-
-    if !has_shift_default {
         return Ok(false);
     }
 
@@ -2194,6 +2208,9 @@ fn infer_operand_kind(
     context: &InstructionContext,
     variant: &str,
 ) -> Result<GeneratedOperandKind, CodegenError> {
+    if let Some(kind) = context.register_hint_kind(semantic_name) {
+        return Ok(kind);
+    }
     if matches!(semantic_name, "op0" | "op1" | "op2" | "crn" | "crm") {
         return Ok(GeneratedOperandKind::SysRegPart);
     }
@@ -2422,11 +2439,8 @@ fn is_known_immediate_field(field_name: &str) -> bool {
     )
 }
 
-fn implicit_default_value(field_name: &str, kind: GeneratedOperandKind) -> Option<i64> {
+fn implicit_default_value(field_name: &str, _kind: GeneratedOperandKind) -> Option<i64> {
     if field_name == "sh" {
-        return Some(0);
-    }
-    if kind == GeneratedOperandKind::ShiftKind && field_name == "shift" {
         return Some(0);
     }
     None
@@ -2462,9 +2476,9 @@ fn register_rank(field_name: &str) -> u16 {
         | "zdn" | "zt" | "za" | "zad" | "zada" | "zat" => 100,
         "rt2" => 110,
         "pg" | "png" | "rn" | "vn" | "zn" | "zan" => 200,
-        "ra" | "pn" | "pnn" => 250,
+        "pn" | "pnn" => 250,
         "pm" | "pnv" | "rm" | "vm" | "zm" => 300,
-        "rs" | "pt" | "pv" => 350,
+        "ra" | "rs" | "pt" | "pv" => 350,
         _ => 375,
     }
 }
@@ -2601,6 +2615,7 @@ fn parse_instruction_module(
         fixed_mask: mask,
         fixed_value: opcode,
         fields,
+        register_hints: BTreeMap::new(),
     }))
 }
 
@@ -2858,6 +2873,7 @@ mod tests {
                 width: 5,
                 signed: false,
             }],
+            register_hints: BTreeMap::new(),
         }];
 
         let text = generate_encoder_module(&input).expect("codegen should succeed");
@@ -2912,6 +2928,7 @@ mod tests {
                         signed: false,
                     },
                 ],
+                register_hints: BTreeMap::new(),
             },
             FlatInstruction {
                 mnemonic: "add".to_string(),
@@ -2945,6 +2962,7 @@ mod tests {
                         signed: false,
                     },
                 ],
+                register_hints: BTreeMap::new(),
             },
             FlatInstruction {
                 mnemonic: "b".to_string(),
@@ -2958,6 +2976,7 @@ mod tests {
                     width: 26,
                     signed: true,
                 }],
+                register_hints: BTreeMap::new(),
             },
             FlatInstruction {
                 mnemonic: "b".to_string(),
@@ -2979,6 +2998,7 @@ mod tests {
                         signed: false,
                     },
                 ],
+                register_hints: BTreeMap::new(),
             },
             FlatInstruction {
                 mnemonic: "cbz".to_string(),
@@ -3000,6 +3020,7 @@ mod tests {
                         signed: false,
                     },
                 ],
+                register_hints: BTreeMap::new(),
             },
             FlatInstruction {
                 mnemonic: "tbz".to_string(),
@@ -3033,6 +3054,7 @@ mod tests {
                         signed: false,
                     },
                 ],
+                register_hints: BTreeMap::new(),
             },
             FlatInstruction {
                 mnemonic: "adr".to_string(),
@@ -3060,6 +3082,7 @@ mod tests {
                         signed: false,
                     },
                 ],
+                register_hints: BTreeMap::new(),
             },
             FlatInstruction {
                 mnemonic: "adrp".to_string(),
@@ -3087,6 +3110,7 @@ mod tests {
                         signed: false,
                     },
                 ],
+                register_hints: BTreeMap::new(),
             },
         ];
 
@@ -3521,6 +3545,73 @@ mod tests {
     }
 
     #[test]
+    fn explicit_register_hints_override_width_hint_for_long_madd() {
+        let variant = "SMADDL_64WA_dp_3src";
+        let width_hint = variant_width_hint(variant);
+        let context = InstructionContext::from_semantic_fields_with_hints(
+            0x9b20_0000,
+            0xffe0_8000,
+            vec![
+                "ra".to_string(),
+                "rm".to_string(),
+                "rn".to_string(),
+                "rd".to_string(),
+            ],
+            BTreeMap::from([
+                ("ra".to_string(), RegisterClassHint::Gpr64),
+                ("rd".to_string(), RegisterClassHint::Gpr64),
+                ("rn".to_string(), RegisterClassHint::Gpr32),
+                ("rm".to_string(), RegisterClassHint::Gpr32),
+            ]),
+        );
+
+        let field = |name: &str, lsb: u8| FlatField {
+            name: name.to_string(),
+            lsb,
+            width: 5,
+            signed: false,
+        };
+
+        let rd = infer_operand_kind(
+            semantic_field_name("rd"),
+            &field("Rd", 0),
+            width_hint,
+            &context,
+            variant,
+        )
+        .expect("rd must map");
+        let rn = infer_operand_kind(
+            semantic_field_name("rn"),
+            &field("Rn", 5),
+            width_hint,
+            &context,
+            variant,
+        )
+        .expect("rn must map");
+        let rm = infer_operand_kind(
+            semantic_field_name("rm"),
+            &field("Rm", 16),
+            width_hint,
+            &context,
+            variant,
+        )
+        .expect("rm must map");
+        let ra = infer_operand_kind(
+            semantic_field_name("ra"),
+            &field("Ra", 10),
+            width_hint,
+            &context,
+            variant,
+        )
+        .expect("ra must map");
+
+        assert_eq!(rd, GeneratedOperandKind::Gpr64Register);
+        assert_eq!(rn, GeneratedOperandKind::Gpr32Register);
+        assert_eq!(rm, GeneratedOperandKind::Gpr32Register);
+        assert_eq!(ra, GeneratedOperandKind::Gpr64Register);
+    }
+
+    #[test]
     fn no_offset_memory_forms_are_tagged_explicitly() {
         let inst = FlatInstruction {
             mnemonic: "stlr".to_string(),
@@ -3542,6 +3633,7 @@ mod tests {
                     signed: false,
                 },
             ],
+            register_hints: BTreeMap::new(),
         };
 
         assert_eq!(
@@ -3572,6 +3664,7 @@ mod tests {
                     signed: false,
                 },
             ],
+            register_hints: BTreeMap::new(),
         };
 
         assert_eq!(
@@ -3594,6 +3687,7 @@ mod tests {
                 width: 7,
                 signed: false,
             }],
+            register_hints: BTreeMap::new(),
         }];
 
         let err = generate_encoder_module(&input).expect_err("must fail for unknown field");
@@ -3711,6 +3805,7 @@ mod tests {
                     signed: false,
                 },
             ],
+            register_hints: BTreeMap::new(),
         };
 
         let (order, kinds, defaults) = derive_operand_metadata(&inst).expect("metadata");
@@ -3722,6 +3817,113 @@ mod tests {
                 GeneratedOperandKind::Gpr64Register,
                 GeneratedOperandKind::Gpr64Register,
                 GeneratedOperandKind::Immediate
+            ]
+        );
+        assert!(defaults.is_empty());
+    }
+
+    #[test]
+    fn three_source_accumulate_orders_rm_before_ra() {
+        let inst = FlatInstruction {
+            mnemonic: "madd".to_string(),
+            variant: "MADD_64A_dp_3src".to_string(),
+            path: "A64/dp3src/MADD_64A_dp_3src".to_string(),
+            fixed_mask: 0xffe0_8000,
+            fixed_value: 0x9b00_0000,
+            fields: vec![
+                FlatField {
+                    name: "Rm".to_string(),
+                    lsb: 16,
+                    width: 5,
+                    signed: false,
+                },
+                FlatField {
+                    name: "Ra".to_string(),
+                    lsb: 10,
+                    width: 5,
+                    signed: false,
+                },
+                FlatField {
+                    name: "Rn".to_string(),
+                    lsb: 5,
+                    width: 5,
+                    signed: false,
+                },
+                FlatField {
+                    name: "Rd".to_string(),
+                    lsb: 0,
+                    width: 5,
+                    signed: false,
+                },
+            ],
+            register_hints: BTreeMap::new(),
+        };
+
+        let (order, kinds, defaults) = derive_operand_metadata(&inst).expect("metadata");
+        assert_eq!(order, vec![3, 2, 0, 1]);
+        assert_eq!(
+            kinds,
+            vec![
+                GeneratedOperandKind::Gpr64Register,
+                GeneratedOperandKind::Gpr64Register,
+                GeneratedOperandKind::Gpr64Register,
+                GeneratedOperandKind::Gpr64Register,
+            ]
+        );
+        assert!(defaults.is_empty());
+    }
+
+    #[test]
+    fn long_madd_uses_metadata_for_mixed_width_operands_and_order() {
+        let inst = FlatInstruction {
+            mnemonic: "smaddl".to_string(),
+            variant: "SMADDL_64WA_dp_3src".to_string(),
+            path: "A64/dp3src/SMADDL_64WA_dp_3src".to_string(),
+            fixed_mask: 0xffe0_8000,
+            fixed_value: 0x9b20_0000,
+            fields: vec![
+                FlatField {
+                    name: "Rm".to_string(),
+                    lsb: 16,
+                    width: 5,
+                    signed: false,
+                },
+                FlatField {
+                    name: "Ra".to_string(),
+                    lsb: 10,
+                    width: 5,
+                    signed: false,
+                },
+                FlatField {
+                    name: "Rn".to_string(),
+                    lsb: 5,
+                    width: 5,
+                    signed: false,
+                },
+                FlatField {
+                    name: "Rd".to_string(),
+                    lsb: 0,
+                    width: 5,
+                    signed: false,
+                },
+            ],
+            register_hints: BTreeMap::from([
+                ("rd".to_string(), RegisterClassHint::Gpr64),
+                ("rn".to_string(), RegisterClassHint::Gpr32),
+                ("rm".to_string(), RegisterClassHint::Gpr32),
+                ("ra".to_string(), RegisterClassHint::Gpr64),
+            ]),
+        };
+
+        let (order, kinds, defaults) = derive_operand_metadata(&inst).expect("metadata");
+        assert_eq!(order, vec![3, 2, 0, 1]);
+        assert_eq!(
+            kinds,
+            vec![
+                GeneratedOperandKind::Gpr64Register,
+                GeneratedOperandKind::Gpr32Register,
+                GeneratedOperandKind::Gpr32Register,
+                GeneratedOperandKind::Gpr64Register,
             ]
         );
         assert!(defaults.is_empty());
@@ -3755,6 +3957,7 @@ mod tests {
                     signed: false,
                 },
             ],
+            register_hints: BTreeMap::new(),
         };
 
         let (order, kinds, _) = derive_operand_metadata(&inst).expect("metadata");
@@ -3813,6 +4016,7 @@ mod tests {
                     signed: false,
                 },
             ],
+            register_hints: BTreeMap::new(),
         };
 
         let (order, kinds, _) = derive_operand_metadata(&inst).expect("metadata");
@@ -3874,6 +4078,7 @@ mod tests {
                     signed: false,
                 },
             ],
+            register_hints: BTreeMap::new(),
         };
 
         let (order, kinds, _) = derive_operand_metadata(&inst).expect("metadata");
@@ -3940,6 +4145,7 @@ mod tests {
                     signed: false,
                 },
             ],
+            register_hints: BTreeMap::new(),
         };
 
         let (order, kinds, _) = derive_operand_metadata(&inst).expect("metadata");
