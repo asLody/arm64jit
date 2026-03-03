@@ -4,7 +4,7 @@ use crate::ast::{
     ParsedRegister, ShiftKindAst,
 };
 use proc_macro::TokenStream;
-use proc_macro2::TokenStream as TokenStream2;
+use proc_macro2::{Literal, TokenStream as TokenStream2};
 use quote::quote;
 use std::collections::HashMap;
 
@@ -300,7 +300,17 @@ fn operand_tokens(operand: OperandAst) -> TokenStream2 {
     }
 }
 
-fn reloc_kind_tokens(mnemonic_id: Option<u16>, args: &[JitArg]) -> Option<TokenStream2> {
+fn is_conditional_branch_alias_mnemonic(mnemonic: &str) -> bool {
+    crate::rules::generated::CONDITIONAL_BRANCH_ALIAS_RULES
+        .binary_search_by(|rule| rule.alias.cmp(mnemonic))
+        .is_ok()
+}
+
+fn reloc_kind_tokens(
+    op_name: &str,
+    mnemonic_id: Option<u16>,
+    args: &[JitArg],
+) -> Option<TokenStream2> {
     let mnemonic_id = mnemonic_id?;
     let reloc_mask = crate::normalize::mnemonic_reloc_mask(mnemonic_id);
 
@@ -309,6 +319,11 @@ fn reloc_kind_tokens(mnemonic_id: Option<u16>, args: &[JitArg]) -> Option<TokenS
             args.first(),
             Some(JitArg::Operand(OperandAst::Condition(_)))
         )
+    {
+        return Some(quote! { ::arm64jit::__private::BranchRelocKind::BCond19 });
+    }
+    if (reloc_mask & crate::rules::generated::RELOC_MASK_BCOND19) != 0
+        && is_conditional_branch_alias_mnemonic(op_name)
     {
         return Some(quote! { ::arm64jit::__private::BranchRelocKind::BCond19 });
     }
@@ -451,9 +466,17 @@ pub(crate) fn expand(input: TokenStream) -> TokenStream {
                     mnemonic_id_cache.insert(op_name.clone(), resolved);
                     resolved
                 };
-                let reloc_kind_hint = reloc_kind_tokens(Some(resolved_mnemonic_id), &inst_args);
-                let direct_variant_id =
-                    crate::shape::lookup_direct_variant_id(resolved_mnemonic_id, &inst_args);
+                let is_alias_mnemonic = crate::rules::generated::lookup_alias_rule(&op_name)
+                    .is_some()
+                    || is_conditional_branch_alias_mnemonic(&op_name);
+                let op_name_lit = Literal::string(&op_name);
+                let reloc_kind_hint =
+                    reloc_kind_tokens(&op_name, Some(resolved_mnemonic_id), &inst_args);
+                let direct_variant_id = if is_alias_mnemonic {
+                    None
+                } else {
+                    crate::shape::lookup_direct_variant_id(resolved_mnemonic_id, &inst_args)
+                };
                 let mut label_fixup_def: Option<usize> = None;
                 let mut args = Vec::new();
 
@@ -499,7 +522,13 @@ pub(crate) fn expand(input: TokenStream) -> TokenStream {
                         return err.to_compile_error().into();
                     };
 
-                    let emit_stmt = if let Some(variant_id) = direct_variant_id {
+                    let emit_stmt = if is_alias_mnemonic {
+                        quote! {
+                            let __jit_code =
+                                ::arm64jit::__private::encode(#op_name_lit, &__jit_args)?;
+                            __jit_asm.emit_word(__jit_code.unpack())?;
+                        }
+                    } else if let Some(variant_id) = direct_variant_id {
                         quote! {
                             ::arm64jit::__private::emit_variant_const_into::<#variant_id>(
                                 __jit_asm,
@@ -527,7 +556,13 @@ pub(crate) fn expand(input: TokenStream) -> TokenStream {
                         __jit_fixup_kind[#fixup_slot] = #reloc_kind;
                     });
                 } else {
-                    let emit_stmt = if let Some(variant_id) = direct_variant_id {
+                    let emit_stmt = if is_alias_mnemonic {
+                        quote! {
+                            let __jit_code =
+                                ::arm64jit::__private::encode(#op_name_lit, &__jit_args)?;
+                            __jit_asm.emit_word(__jit_code.unpack())?;
+                        }
+                    } else if let Some(variant_id) = direct_variant_id {
                         quote! {
                             ::arm64jit::__private::emit_variant_const_into::<#variant_id>(
                                 __jit_asm,
