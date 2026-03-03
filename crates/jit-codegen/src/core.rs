@@ -75,6 +75,17 @@ enum GeneratedSplitImmediateKind {
         b5_field_index: u8,
         b40_field_index: u8,
     },
+    LogicalImmRs {
+        immr_field_index: u8,
+        imms_field_index: u8,
+        reg_size: u8,
+    },
+    LogicalImmNrs {
+        n_field_index: u8,
+        immr_field_index: u8,
+        imms_field_index: u8,
+        reg_size: u8,
+    },
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -240,6 +251,15 @@ fn expected_user_operand_kinds(
     operand_kinds: &[GeneratedOperandKind],
     split_plan: Option<GeneratedSplitImmediatePlan>,
 ) -> Vec<GeneratedOperandKind> {
+    fn split_input_span(kind: GeneratedSplitImmediateKind) -> usize {
+        match kind {
+            GeneratedSplitImmediateKind::AdrLike { .. }
+            | GeneratedSplitImmediateKind::BitIndex6 { .. }
+            | GeneratedSplitImmediateKind::LogicalImmRs { .. } => 2,
+            GeneratedSplitImmediateKind::LogicalImmNrs { .. } => 3,
+        }
+    }
+
     let mut out = Vec::with_capacity(operand_kinds.len());
     let mut slot = 0usize;
     while slot < operand_kinds.len() {
@@ -247,7 +267,7 @@ fn expected_user_operand_kinds(
             && slot == usize::from(plan.first_slot)
         {
             out.push(GeneratedOperandKind::Immediate);
-            slot = slot.saturating_add(2);
+            slot = slot.saturating_add(split_input_span(plan.kind));
             continue;
         }
         out.push(operand_kinds[slot]);
@@ -742,6 +762,31 @@ pub fn generate_encoder_module(flat: &[FlatInstruction]) -> Result<String, Codeg
                     },
             }) => format!(
                 "Some(SplitImmediatePlanSpec {{ first_slot: {first_slot}, second_slot: {second_slot}, kind: SplitImmediateKindSpec::BitIndex6 {{ b5_field_index: {b5_field_index}, b40_field_index: {b40_field_index} }} }})"
+            ),
+            Some(GeneratedSplitImmediatePlan {
+                first_slot,
+                second_slot,
+                kind:
+                    GeneratedSplitImmediateKind::LogicalImmRs {
+                        immr_field_index,
+                        imms_field_index,
+                        reg_size,
+                    },
+            }) => format!(
+                "Some(SplitImmediatePlanSpec {{ first_slot: {first_slot}, second_slot: {second_slot}, kind: SplitImmediateKindSpec::LogicalImmRs {{ immr_field_index: {immr_field_index}, imms_field_index: {imms_field_index}, reg_size: {reg_size} }} }})"
+            ),
+            Some(GeneratedSplitImmediatePlan {
+                first_slot,
+                second_slot,
+                kind:
+                    GeneratedSplitImmediateKind::LogicalImmNrs {
+                        n_field_index,
+                        immr_field_index,
+                        imms_field_index,
+                        reg_size,
+                    },
+            }) => format!(
+                "Some(SplitImmediatePlanSpec {{ first_slot: {first_slot}, second_slot: {second_slot}, kind: SplitImmediateKindSpec::LogicalImmNrs {{ n_field_index: {n_field_index}, immr_field_index: {immr_field_index}, imms_field_index: {imms_field_index}, reg_size: {reg_size} }} }})"
             ),
             None => String::from("None"),
         };
@@ -1721,9 +1766,13 @@ fn operand_slot_for_field_index(operand_order: &[u8], field_index: usize) -> Opt
     found
 }
 
-fn has_adjacent_immediate_pair(kinds: &[GeneratedOperandKind]) -> bool {
+fn has_adjacent_immediate_runs(kinds: &[GeneratedOperandKind]) -> bool {
     kinds.windows(2).any(|pair| {
         pair[0] == GeneratedOperandKind::Immediate && pair[1] == GeneratedOperandKind::Immediate
+    }) || kinds.windows(3).any(|triple| {
+        triple[0] == GeneratedOperandKind::Immediate
+            && triple[1] == GeneratedOperandKind::Immediate
+            && triple[2] == GeneratedOperandKind::Immediate
     })
 }
 
@@ -1881,11 +1930,104 @@ fn derive_split_immediate_plan(
     operand_order: &[u8],
     operand_kinds: &[GeneratedOperandKind],
 ) -> Option<GeneratedSplitImmediatePlan> {
-    if !has_adjacent_immediate_pair(operand_kinds) {
+    if !has_adjacent_immediate_runs(operand_kinds) {
         return None;
     }
 
     let semantic_fields = normalized_semantic_fields(inst);
+    let is_logical_immediate_mnemonic =
+        matches!(inst.mnemonic.as_str(), "and" | "ands" | "eor" | "orr");
+    let n_field_index = unique_semantic_field_index(&semantic_fields, "n");
+    let immr_field_index = unique_semantic_field_index(&semantic_fields, "immr");
+    let imms_field_index = unique_semantic_field_index(&semantic_fields, "imms");
+    if is_logical_immediate_mnemonic
+        && let (Some(n_field_index), Some(immr_field_index), Some(imms_field_index)) =
+            (n_field_index, immr_field_index, imms_field_index)
+    {
+        let n_slot = operand_slot_for_field_index(operand_order, n_field_index)?;
+        let immr_slot = operand_slot_for_field_index(operand_order, immr_field_index)?;
+        let imms_slot = operand_slot_for_field_index(operand_order, imms_field_index)?;
+        let mut slots = [n_slot, immr_slot, imms_slot];
+        slots.sort_unstable();
+        let first_slot = slots[0];
+        let second_slot = slots[2];
+        if second_slot == first_slot + 2
+            && operand_kinds.get(first_slot) == Some(&GeneratedOperandKind::Immediate)
+            && operand_kinds.get(first_slot + 1) == Some(&GeneratedOperandKind::Immediate)
+            && operand_kinds.get(second_slot) == Some(&GeneratedOperandKind::Immediate)
+        {
+            let rd_field_index = unique_semantic_field_index(&semantic_fields, "rd")
+                .or_else(|| unique_semantic_field_index(&semantic_fields, "rt"));
+            let reg_size = if let Some(rd_field_index) = rd_field_index {
+                let rd_slot = operand_slot_for_field_index(operand_order, rd_field_index)?;
+                match operand_kinds.get(rd_slot).copied() {
+                    Some(GeneratedOperandKind::Gpr32Register) => 32u8,
+                    Some(GeneratedOperandKind::Gpr64Register) => 64u8,
+                    _ => return None,
+                }
+            } else {
+                return None;
+            };
+
+            let first_slot = u8::try_from(first_slot).ok()?;
+            let second_slot = u8::try_from(second_slot).ok()?;
+            let n_field_index = u8::try_from(n_field_index).ok()?;
+            let immr_field_index = u8::try_from(immr_field_index).ok()?;
+            let imms_field_index = u8::try_from(imms_field_index).ok()?;
+            return Some(GeneratedSplitImmediatePlan {
+                first_slot,
+                second_slot,
+                kind: GeneratedSplitImmediateKind::LogicalImmNrs {
+                    n_field_index,
+                    immr_field_index,
+                    imms_field_index,
+                    reg_size,
+                },
+            });
+        }
+    }
+
+    if is_logical_immediate_mnemonic
+        && let (Some(immr_field_index), Some(imms_field_index)) =
+            (immr_field_index, imms_field_index)
+    {
+        let immr_slot = operand_slot_for_field_index(operand_order, immr_field_index)?;
+        let imms_slot = operand_slot_for_field_index(operand_order, imms_field_index)?;
+        let first_slot = immr_slot.min(imms_slot);
+        let second_slot = immr_slot.max(imms_slot);
+        if second_slot == first_slot + 1
+            && operand_kinds.get(first_slot) == Some(&GeneratedOperandKind::Immediate)
+            && operand_kinds.get(second_slot) == Some(&GeneratedOperandKind::Immediate)
+        {
+            let rd_field_index = unique_semantic_field_index(&semantic_fields, "rd")
+                .or_else(|| unique_semantic_field_index(&semantic_fields, "rt"));
+            let reg_size = if let Some(rd_field_index) = rd_field_index {
+                let rd_slot = operand_slot_for_field_index(operand_order, rd_field_index)?;
+                match operand_kinds.get(rd_slot).copied() {
+                    Some(GeneratedOperandKind::Gpr32Register) => 32u8,
+                    Some(GeneratedOperandKind::Gpr64Register) => 64u8,
+                    _ => return None,
+                }
+            } else {
+                return None;
+            };
+
+            let first_slot = u8::try_from(first_slot).ok()?;
+            let second_slot = u8::try_from(second_slot).ok()?;
+            let immr_field_index = u8::try_from(immr_field_index).ok()?;
+            let imms_field_index = u8::try_from(imms_field_index).ok()?;
+            return Some(GeneratedSplitImmediatePlan {
+                first_slot,
+                second_slot,
+                kind: GeneratedSplitImmediateKind::LogicalImmRs {
+                    immr_field_index,
+                    imms_field_index,
+                    reg_size,
+                },
+            });
+        }
+    }
+
     let immlo_field_index = unique_semantic_field_index(&semantic_fields, "immlo");
     let immhi_field_index = unique_semantic_field_index(&semantic_fields, "immhi");
     if let (Some(immlo_field_index), Some(immhi_field_index)) =
@@ -1995,7 +2137,7 @@ fn variant_width_hint(variant: &str) -> VariantWidthHint {
                 if prefix.is_empty() || !prefix.chars().all(|ch| ch.is_ascii_alphabetic()) {
                     continue;
                 }
-                if matches!(prefix, "lr" | "r" | "x" | "w") {
+                if matches!(prefix, "lr" | "sl" | "r" | "x" | "w") {
                     return hint;
                 }
             }
@@ -3127,6 +3269,14 @@ mod tests {
             variant_width_hint("LDAR_LR64_ldstord"),
             VariantWidthHint::W64
         );
+        assert_eq!(
+            variant_width_hint("STLRH_SL32_ldstord"),
+            VariantWidthHint::W32
+        );
+        assert_eq!(
+            variant_width_hint("STLR_SL64_ldstord"),
+            VariantWidthHint::W64
+        );
         assert_eq!(variant_width_hint("FOO_U32_bar"), VariantWidthHint::Unknown);
         assert_eq!(variant_width_hint("foo_bar"), VariantWidthHint::Unknown);
     }
@@ -3620,6 +3770,133 @@ mod tests {
                     scale: 1,
                 },
             }
+        );
+    }
+
+    #[test]
+    fn derives_split_immediate_plan_for_logical_immediate_variants() {
+        let inst = FlatInstruction {
+            mnemonic: "eor".to_string(),
+            variant: "EOR_64_log_imm".to_string(),
+            path: "A64/eor/EOR_64_log_imm".to_string(),
+            fixed_mask: 0xff80_0000,
+            fixed_value: 0xd200_0000,
+            fields: vec![
+                FlatField {
+                    name: "N".to_string(),
+                    lsb: 22,
+                    width: 1,
+                    signed: false,
+                },
+                FlatField {
+                    name: "immr".to_string(),
+                    lsb: 16,
+                    width: 6,
+                    signed: false,
+                },
+                FlatField {
+                    name: "imms".to_string(),
+                    lsb: 10,
+                    width: 6,
+                    signed: false,
+                },
+                FlatField {
+                    name: "Rn".to_string(),
+                    lsb: 5,
+                    width: 5,
+                    signed: false,
+                },
+                FlatField {
+                    name: "Rd".to_string(),
+                    lsb: 0,
+                    width: 5,
+                    signed: false,
+                },
+            ],
+        };
+
+        let (order, kinds, _) = derive_operand_metadata(&inst).expect("metadata");
+        let plan = derive_split_immediate_plan(&inst, &order, &kinds).expect("split plan");
+        assert_eq!(
+            plan,
+            GeneratedSplitImmediatePlan {
+                first_slot: 2,
+                second_slot: 4,
+                kind: GeneratedSplitImmediateKind::LogicalImmNrs {
+                    n_field_index: 0,
+                    immr_field_index: 1,
+                    imms_field_index: 2,
+                    reg_size: 64,
+                },
+            }
+        );
+        assert_eq!(
+            expected_user_operand_kinds(&kinds, Some(plan)),
+            vec![
+                GeneratedOperandKind::Gpr64Register,
+                GeneratedOperandKind::Gpr64Register,
+                GeneratedOperandKind::Immediate
+            ]
+        );
+    }
+
+    #[test]
+    fn derives_split_immediate_plan_for_32bit_logical_immediate_variants() {
+        let inst = FlatInstruction {
+            mnemonic: "eor".to_string(),
+            variant: "EOR_32_log_imm".to_string(),
+            path: "A64/eor/EOR_32_log_imm".to_string(),
+            fixed_mask: 0xffc0_0000,
+            fixed_value: 0x5200_0000,
+            fields: vec![
+                FlatField {
+                    name: "immr".to_string(),
+                    lsb: 16,
+                    width: 6,
+                    signed: false,
+                },
+                FlatField {
+                    name: "imms".to_string(),
+                    lsb: 10,
+                    width: 6,
+                    signed: false,
+                },
+                FlatField {
+                    name: "Rn".to_string(),
+                    lsb: 5,
+                    width: 5,
+                    signed: false,
+                },
+                FlatField {
+                    name: "Rd".to_string(),
+                    lsb: 0,
+                    width: 5,
+                    signed: false,
+                },
+            ],
+        };
+
+        let (order, kinds, _) = derive_operand_metadata(&inst).expect("metadata");
+        let plan = derive_split_immediate_plan(&inst, &order, &kinds).expect("split plan");
+        assert_eq!(
+            plan,
+            GeneratedSplitImmediatePlan {
+                first_slot: 2,
+                second_slot: 3,
+                kind: GeneratedSplitImmediateKind::LogicalImmRs {
+                    immr_field_index: 0,
+                    imms_field_index: 1,
+                    reg_size: 32,
+                },
+            }
+        );
+        assert_eq!(
+            expected_user_operand_kinds(&kinds, Some(plan)),
+            vec![
+                GeneratedOperandKind::Gpr32Register,
+                GeneratedOperandKind::Gpr32Register,
+                GeneratedOperandKind::Immediate
+            ]
         );
     }
 

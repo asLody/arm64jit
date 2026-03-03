@@ -577,6 +577,17 @@ enum SplitImmediateKind {
         b5_field_idx: usize,
         b40_field_idx: usize,
     },
+    LogicalImmRs {
+        immr_field_idx: usize,
+        imms_field_idx: usize,
+        reg_size: u8,
+    },
+    LogicalImmNrs {
+        n_field_idx: usize,
+        immr_field_idx: usize,
+        imms_field_idx: usize,
+        reg_size: u8,
+    },
 }
 
 #[inline]
@@ -601,6 +612,26 @@ fn spec_split_immediate_plan(spec: &EncodingSpec) -> Option<SplitImmediatePlan> 
                 b5_field_idx: usize::from(b5_field_index),
                 b40_field_idx: usize::from(b40_field_index),
             },
+            SplitImmediateKindSpec::LogicalImmRs {
+                immr_field_index,
+                imms_field_index,
+                reg_size,
+            } => SplitImmediateKind::LogicalImmRs {
+                immr_field_idx: usize::from(immr_field_index),
+                imms_field_idx: usize::from(imms_field_index),
+                reg_size,
+            },
+            SplitImmediateKindSpec::LogicalImmNrs {
+                n_field_index,
+                immr_field_index,
+                imms_field_index,
+                reg_size,
+            } => SplitImmediateKind::LogicalImmNrs {
+                n_field_idx: usize::from(n_field_index),
+                immr_field_idx: usize::from(immr_field_index),
+                imms_field_idx: usize::from(imms_field_index),
+                reg_size,
+            },
         },
     })
 }
@@ -608,6 +639,86 @@ fn spec_split_immediate_plan(spec: &EncodingSpec) -> Option<SplitImmediatePlan> 
 #[inline]
 fn spec_maybe_split_immediate(spec: &EncodingSpec) -> bool {
     spec.split_immediate_plan.is_some()
+}
+
+#[inline]
+fn split_plan_input_span(plan: SplitImmediatePlan) -> usize {
+    match plan.kind {
+        SplitImmediateKind::AdrLike { .. }
+        | SplitImmediateKind::BitIndex6 { .. }
+        | SplitImmediateKind::LogicalImmRs { .. } => 2,
+        SplitImmediateKind::LogicalImmNrs { .. } => 3,
+    }
+}
+
+#[inline]
+fn low_bits_mask(width: u8) -> u64 {
+    if width >= 64 {
+        u64::MAX
+    } else {
+        (1u64 << width) - 1
+    }
+}
+
+#[inline]
+fn rotate_right_with_width(value: u64, amount: u8, width: u8) -> u64 {
+    let mask = low_bits_mask(width);
+    let value = value & mask;
+    let r = amount % width;
+    if r == 0 {
+        value
+    } else {
+        ((value >> r) | (value << (width - r))) & mask
+    }
+}
+
+#[inline]
+fn replicate_pattern_to_width(pattern: u64, element_width: u8, width: u8) -> u64 {
+    let element_mask = low_bits_mask(element_width);
+    let element = pattern & element_mask;
+    let mut out = 0u64;
+    let mut shift = 0u8;
+    while shift < width {
+        out |= element << shift;
+        shift = shift.saturating_add(element_width);
+    }
+    out & low_bits_mask(width)
+}
+
+fn encode_logical_immediate_nrs(value: i64, reg_size: u8) -> Option<(i64, i64, i64)> {
+    if reg_size != 32 && reg_size != 64 {
+        return None;
+    }
+    let mask = low_bits_mask(reg_size);
+    let bits = (value as u64) & mask;
+    if bits == 0 || bits == mask {
+        return None;
+    }
+
+    let mut element_width = 2u8;
+    while element_width <= reg_size {
+        let pattern = bits & low_bits_mask(element_width);
+        if replicate_pattern_to_width(pattern, element_width, reg_size) == bits {
+            let mut ones = 1u8;
+            while ones < element_width {
+                let base = low_bits_mask(ones);
+                let mut immr = 0u8;
+                while immr < element_width {
+                    if rotate_right_with_width(base, immr, element_width) == pattern {
+                        let n = if element_width == 64 { 1i64 } else { 0i64 };
+                        let imms =
+                            ((-(i64::from(element_width) << 1)) | (i64::from(ones) - 1)) & 0x3f;
+                        return Some((n, i64::from(immr), imms));
+                    }
+                    immr = immr.saturating_add(1);
+                }
+                ones = ones.saturating_add(1);
+            }
+        }
+        element_width = element_width.saturating_mul(2);
+    }
+
+    None
 }
 
 fn scale_immediate(field: &'static str, value: i64, scale: i64) -> Result<i64, EncodeError> {
@@ -751,13 +862,65 @@ fn encode_flat_ordered(
                         filled_mask |= 1u64 << b5_field_idx;
                         filled_mask |= 1u64 << b40_field_idx;
                     }
+                    SplitImmediateKind::LogicalImmRs {
+                        immr_field_idx,
+                        imms_field_idx,
+                        reg_size,
+                    } => {
+                        if immr_field_idx >= values.len() || imms_field_idx >= values.len() {
+                            return Err(EncodeError::OperandCountMismatch);
+                        }
+                        let Some((_, immr, imms)) =
+                            encode_logical_immediate_nrs(actual.value, reg_size)
+                        else {
+                            return Err(EncodeError::OperandOutOfRange {
+                                field: first_field.name,
+                                value: actual.value,
+                                width: reg_size,
+                                signed: false,
+                            });
+                        };
+                        values[immr_field_idx] = immr;
+                        values[imms_field_idx] = imms;
+                        filled_mask |= 1u64 << immr_field_idx;
+                        filled_mask |= 1u64 << imms_field_idx;
+                    }
+                    SplitImmediateKind::LogicalImmNrs {
+                        n_field_idx,
+                        immr_field_idx,
+                        imms_field_idx,
+                        reg_size,
+                    } => {
+                        if n_field_idx >= values.len()
+                            || immr_field_idx >= values.len()
+                            || imms_field_idx >= values.len()
+                        {
+                            return Err(EncodeError::OperandCountMismatch);
+                        }
+                        let Some((n, immr, imms)) =
+                            encode_logical_immediate_nrs(actual.value, reg_size)
+                        else {
+                            return Err(EncodeError::OperandOutOfRange {
+                                field: first_field.name,
+                                value: actual.value,
+                                width: reg_size,
+                                signed: false,
+                            });
+                        };
+                        values[n_field_idx] = n;
+                        values[immr_field_idx] = immr;
+                        values[imms_field_idx] = imms;
+                        filled_mask |= 1u64 << n_field_idx;
+                        filled_mask |= 1u64 << immr_field_idx;
+                        filled_mask |= 1u64 << imms_field_idx;
+                    }
                 }
                 input_idx += 1;
                 slot += 1;
                 continue;
             }
 
-            if slot == plan.second_slot {
+            if slot > plan.first_slot && slot <= plan.second_slot {
                 slot += 1;
                 continue;
             }
@@ -1063,19 +1226,25 @@ fn encode_by_spec_from_flattened(
     if spec.fields.len() > 64 {
         return Err(EncodeError::OperandCountMismatch);
     }
-    let split_before_materialize = if flat_len + 1 == spec.operand_order.len() {
-        if spec_maybe_split_immediate(spec) {
-            spec_split_immediate_plan(spec)
+    let split_before_materialize = if spec_maybe_split_immediate(spec) {
+        if let Some(plan) = spec_split_immediate_plan(spec) {
+            let merge = split_plan_input_span(plan).saturating_sub(1);
+            if flat_len + merge == spec.operand_order.len() {
+                Some(plan)
+            } else {
+                None
+            }
         } else {
             None
         }
     } else {
         None
     };
-    let expected_flat_len = if split_before_materialize.is_some() {
+    let expected_flat_len = if let Some(plan) = split_before_materialize {
+        let merge = split_plan_input_span(plan).saturating_sub(1);
         spec.operand_order
             .len()
-            .checked_sub(1)
+            .checked_sub(merge)
             .ok_or(EncodeError::OperandCountMismatch)?
     } else {
         spec.operand_order.len()
@@ -1350,7 +1519,7 @@ fn expected_user_operand_kinds(
             if slot == plan.first_slot {
                 out[out_len] = OperandConstraintKind::Immediate;
                 out_len += 1;
-                slot = slot.saturating_add(2);
+                slot = slot.saturating_add(split_plan_input_span(plan));
                 continue;
             }
         }
@@ -1590,8 +1759,9 @@ fn build_operand_delta_hint(
 }
 
 fn spec_expected_user_operand_count(spec: &EncodingSpec) -> usize {
-    if spec_split_immediate_plan(spec).is_some() {
-        spec.operand_order.len().saturating_sub(1)
+    if let Some(plan) = spec_split_immediate_plan(spec) {
+        let merge = split_plan_input_span(plan).saturating_sub(1);
+        spec.operand_order.len().saturating_sub(merge)
     } else {
         spec.operand_order.len()
     }
@@ -2064,6 +2234,120 @@ mod tests {
                 immlo_field_index: 0,
                 immhi_field_index: 1,
                 scale: 4096,
+            },
+        }),
+        gpr32_extend_compatibility: 0,
+    };
+
+    const EOR_64_LOG_IMM_SPEC: EncodingSpec = EncodingSpec {
+        mnemonic: "eor",
+        variant: "EOR_64_log_imm",
+        opcode: 0xd200_0000,
+        opcode_mask: 0xff80_0000,
+        fields: &[
+            BitFieldSpec {
+                name: "N",
+                lsb: 22,
+                width: 1,
+                signed: false,
+            },
+            BitFieldSpec {
+                name: "immr",
+                lsb: 16,
+                width: 6,
+                signed: false,
+            },
+            BitFieldSpec {
+                name: "imms",
+                lsb: 10,
+                width: 6,
+                signed: false,
+            },
+            BitFieldSpec {
+                name: "Rn",
+                lsb: 5,
+                width: 5,
+                signed: false,
+            },
+            BitFieldSpec {
+                name: "Rd",
+                lsb: 0,
+                width: 5,
+                signed: false,
+            },
+        ],
+        operand_order: &[4, 3, 0, 1, 2],
+        operand_kinds: &[
+            OperandConstraintKind::Gpr64Register,
+            OperandConstraintKind::Gpr64Register,
+            OperandConstraintKind::Immediate,
+            OperandConstraintKind::Immediate,
+            OperandConstraintKind::Immediate,
+        ],
+        implicit_defaults: &[],
+        memory_addressing: MemoryAddressingConstraintSpec::None,
+        field_scales: &[1, 1, 1, 1, 1],
+        split_immediate_plan: Some(SplitImmediatePlanSpec {
+            first_slot: 2,
+            second_slot: 4,
+            kind: SplitImmediateKindSpec::LogicalImmNrs {
+                n_field_index: 0,
+                immr_field_index: 1,
+                imms_field_index: 2,
+                reg_size: 64,
+            },
+        }),
+        gpr32_extend_compatibility: 0,
+    };
+
+    const EOR_32_LOG_IMM_SPEC: EncodingSpec = EncodingSpec {
+        mnemonic: "eor",
+        variant: "EOR_32_log_imm",
+        opcode: 0x5200_0000,
+        opcode_mask: 0xffc0_0000,
+        fields: &[
+            BitFieldSpec {
+                name: "immr",
+                lsb: 16,
+                width: 6,
+                signed: false,
+            },
+            BitFieldSpec {
+                name: "imms",
+                lsb: 10,
+                width: 6,
+                signed: false,
+            },
+            BitFieldSpec {
+                name: "Rn",
+                lsb: 5,
+                width: 5,
+                signed: false,
+            },
+            BitFieldSpec {
+                name: "Rd",
+                lsb: 0,
+                width: 5,
+                signed: false,
+            },
+        ],
+        operand_order: &[3, 2, 0, 1],
+        operand_kinds: &[
+            OperandConstraintKind::Gpr32Register,
+            OperandConstraintKind::Gpr32Register,
+            OperandConstraintKind::Immediate,
+            OperandConstraintKind::Immediate,
+        ],
+        implicit_defaults: &[],
+        memory_addressing: MemoryAddressingConstraintSpec::None,
+        field_scales: &[1, 1, 1, 1],
+        split_immediate_plan: Some(SplitImmediatePlanSpec {
+            first_slot: 2,
+            second_slot: 3,
+            kind: SplitImmediateKindSpec::LogicalImmRs {
+                immr_field_index: 0,
+                imms_field_index: 1,
+                reg_size: 32,
             },
         }),
         gpr32_extend_compatibility: 0,
@@ -2651,6 +2935,54 @@ mod tests {
                 scale: 4096,
             }
         );
+    }
+
+    #[test]
+    fn eor_64_logical_immediate_encodes_single_bitmask_operand() {
+        let code = encode_by_spec_operands(
+            &EOR_64_LOG_IMM_SPEC,
+            &[
+                Operand::Register(RegisterOperand {
+                    code: 0,
+                    class: RegClass::X,
+                    arrangement: None,
+                    lane: None,
+                }),
+                Operand::Register(RegisterOperand {
+                    code: 0,
+                    class: RegClass::X,
+                    arrangement: None,
+                    lane: None,
+                }),
+                Operand::Immediate(0x2000_0000),
+            ],
+        )
+        .expect("eor x,x,#imm must encode");
+        assert_eq!(code.unpack(), 0xd263_0000);
+    }
+
+    #[test]
+    fn eor_32_logical_immediate_encodes_single_bitmask_operand() {
+        let code = encode_by_spec_operands(
+            &EOR_32_LOG_IMM_SPEC,
+            &[
+                Operand::Register(RegisterOperand {
+                    code: 0,
+                    class: RegClass::W,
+                    arrangement: None,
+                    lane: None,
+                }),
+                Operand::Register(RegisterOperand {
+                    code: 0,
+                    class: RegClass::W,
+                    arrangement: None,
+                    lane: None,
+                }),
+                Operand::Immediate(0x2000_0000),
+            ],
+        )
+        .expect("eor w,w,#imm must encode");
+        assert_eq!(code.unpack(), 0x5203_0000);
     }
 
     #[test]

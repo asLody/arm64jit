@@ -164,6 +164,26 @@ pub enum SplitImmediateKindSpec {
         /// Field index of `b40`.
         b40_field_index: u8,
     },
+    /// Logical-immediate split: one user bitmask immediate into `immr`/`imms`.
+    LogicalImmRs {
+        /// Field index of `immr`.
+        immr_field_index: u8,
+        /// Field index of `imms`.
+        imms_field_index: u8,
+        /// Register width used by this variant (`32` or `64`).
+        reg_size: u8,
+    },
+    /// Logical-immediate split: one user bitmask immediate into `N`/`immr`/`imms`.
+    LogicalImmNrs {
+        /// Field index of `N`.
+        n_field_index: u8,
+        /// Field index of `immr`.
+        immr_field_index: u8,
+        /// Field index of `imms`.
+        imms_field_index: u8,
+        /// Register width used by this variant (`32` or `64`).
+        reg_size: u8,
+    },
 }
 
 /// Implicit default for one encoding field.

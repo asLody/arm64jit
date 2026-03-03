@@ -632,3 +632,57 @@ fn block_rejects_stlr_with_explicit_zero_offset() {
         other => panic!("unexpected error: {other:?}"),
     }
 }
+
+#[test]
+fn block_supports_stlrh_with_w_register_source() {
+    let mut storage = [0u32; 8];
+    let mut ops = CodeWriter::new(&mut storage);
+    let src = 0u8;
+    let addr = 1u8;
+
+    jit!(ops
+        ; stlrh W(src), [X(addr)]
+        ; stlrh w0, [x1]
+    )
+    .expect("stlrh forms should encode");
+
+    let code = emitted(&ops);
+    assert_eq!(
+        word_at(&code, 0),
+        encode("stlrh", &[w(src), mem_x(addr)])
+            .expect("expected stlrh w")
+            .unpack()
+    );
+    assert_eq!(
+        word_at(&code, 1),
+        encode("stlrh", &[w(0), mem_x(1)])
+            .expect("expected stlrh w static")
+            .unpack()
+    );
+}
+
+#[test]
+fn block_supports_eor_logical_immediate_bitmask() {
+    let mut storage = [0u32; 8];
+    let mut ops = CodeWriter::new(&mut storage);
+
+    jit!(ops
+        ; eor x0, x0, #0x20000000
+        ; eor w1, w1, #0x20000000
+    )
+    .expect("eor logical immediate forms should encode");
+
+    let code = emitted(&ops);
+    assert_eq!(
+        word_at(&code, 0),
+        encode("eor", &[x(0), x(0), imm(0x20000000)])
+            .expect("expected eor x logical imm")
+            .unpack()
+    );
+    assert_eq!(
+        word_at(&code, 1),
+        encode("eor", &[w(1), w(1), imm(0x20000000)])
+            .expect("expected eor w logical imm")
+            .unpack()
+    );
+}
