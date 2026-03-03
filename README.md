@@ -19,7 +19,7 @@ Generated from vendored Arm AARCHMRS data (`AARCHMRS_OPENSOURCE_A_profile_FAT-20
 
 ```toml
 [dependencies]
-arm64jit = "0.3.7"
+arm64jit = "0.3.8"
 ```
 
 ## Usage

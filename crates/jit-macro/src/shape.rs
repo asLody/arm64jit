@@ -231,11 +231,28 @@ fn shape_keys_for_args(args: &[JitArg]) -> Option<Vec<u128>> {
     Some(keys)
 }
 
-pub(crate) fn lookup_mnemonic_id(op_name: &str) -> Option<u16> {
+fn lookup_canonical_mnemonic_id(mnemonic: &str) -> Option<u16> {
     let idx = crate::rules::generated::MNEMONIC_ID_RULES
-        .binary_search_by(|rule| rule.mnemonic.cmp(op_name))
+        .binary_search_by(|rule| rule.mnemonic.cmp(mnemonic))
         .ok()?;
     Some(crate::rules::generated::MNEMONIC_ID_RULES[idx].id)
+}
+
+pub(crate) fn lookup_mnemonic_id(op_name: &str) -> Option<u16> {
+    if let Some(id) = lookup_canonical_mnemonic_id(op_name) {
+        return Some(id);
+    }
+    if let Some(rule) = crate::rules::generated::lookup_alias_rule(op_name) {
+        return lookup_canonical_mnemonic_id(rule.canonical);
+    }
+    if let Ok(idx) = crate::rules::generated::CONDITIONAL_BRANCH_ALIAS_RULES
+        .binary_search_by(|rule| rule.alias.cmp(op_name))
+    {
+        return lookup_canonical_mnemonic_id(
+            crate::rules::generated::CONDITIONAL_BRANCH_ALIAS_RULES[idx].base_mnemonic,
+        );
+    }
+    None
 }
 
 pub(crate) fn lookup_direct_variant_id(mnemonic_id: u16, args: &[JitArg]) -> Option<u16> {
@@ -261,4 +278,17 @@ pub(crate) fn lookup_direct_variant_id(mnemonic_id: u16, args: &[JitArg]) -> Opt
         }
     }
     selected
+}
+
+#[cfg(test)]
+mod tests {
+    use super::lookup_mnemonic_id;
+
+    #[test]
+    fn lookup_mnemonic_id_resolves_aliases_to_canonical_ids() {
+        assert_eq!(lookup_mnemonic_id("bfi"), lookup_mnemonic_id("bfm"));
+        assert_eq!(lookup_mnemonic_id("bfxil"), lookup_mnemonic_id("bfm"));
+        assert_eq!(lookup_mnemonic_id("sbfiz"), lookup_mnemonic_id("sbfm"));
+        assert_eq!(lookup_mnemonic_id("stsetl"), lookup_mnemonic_id("ldsetl"));
+    }
 }

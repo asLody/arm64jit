@@ -350,6 +350,37 @@ fn block_supports_ubfx_alias_with_dynamic_immediates() {
 }
 
 #[test]
+fn block_supports_bfi_and_bfxil_aliases() {
+    let mut storage = [0u32; 4];
+    let mut ops = CodeWriter::new(&mut storage);
+    let lsb = 2i64;
+    let width = 3i64;
+
+    jit!(ops
+        ; bfi x0, x1, #lsb, #width
+        ; bfxil x2, x3, #lsb, #width
+    )
+    .expect("bfi/bfxil aliases should normalize to bfm");
+
+    let code = emitted(&ops);
+    assert_eq!(
+        word_at(&code, 0),
+        encode(
+            "bfm",
+            &[x(0), x(1), imm((-lsb).rem_euclid(64)), imm(width - 1)]
+        )
+        .expect("bfm for bfi")
+        .unpack()
+    );
+    assert_eq!(
+        word_at(&code, 1),
+        encode("bfm", &[x(2), x(3), imm(lsb), imm(lsb + width - 1)])
+            .expect("bfm for bfxil")
+            .unpack()
+    );
+}
+
+#[test]
 fn block_supports_scalar_sxt_uxt_alias_family_despite_sve_name_collision() {
     let mut storage = [0u32; 8];
     let mut ops = CodeWriter::new(&mut storage);

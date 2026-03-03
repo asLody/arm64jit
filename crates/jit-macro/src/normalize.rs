@@ -1,4 +1,7 @@
-use crate::ast::{ConditionAst, InstructionStmt, JitArg, OperandAst, ParsedRegister, ShiftKindAst};
+use crate::ast::{
+    ConditionAst, InstructionStmt, JitArg, OperandAst, ParsedMemoryOffset, ParsedRegister,
+    ShiftKindAst,
+};
 use quote::quote;
 use syn::ExprUnary;
 use syn::{Expr, ExprLit, Lit, Result, UnOp, parse_quote};
@@ -22,10 +25,22 @@ fn arg_immediate_zero() -> JitArg {
     JitArg::Operand(OperandAst::Immediate(parse_quote!(0)))
 }
 
+fn arg_immediate(expr: Expr) -> JitArg {
+    JitArg::Operand(OperandAst::Immediate(expr))
+}
+
 fn gpr_data_class(class: &'static str) -> Option<&'static str> {
     match class {
         "W" | "Wsp" => Some("W"),
         "X" | "Xsp" => Some("X"),
+        _ => None,
+    }
+}
+
+fn gpr_data_bits(class: &'static str) -> Option<i64> {
+    match class {
+        "W" | "Wsp" => Some(32),
+        "X" | "Xsp" => Some(64),
         _ => None,
     }
 }
@@ -110,6 +125,27 @@ fn arg_register(reg: ParsedRegister) -> JitArg {
 
 fn arg_condition(condition: ConditionAst) -> JitArg {
     JitArg::Operand(OperandAst::Condition(condition))
+}
+
+fn extract_stsetl_base(arg: &JitArg) -> Option<ParsedRegister> {
+    match arg {
+        JitArg::Operand(OperandAst::Register(reg)) if is_gpr_class(reg.class) => Some(reg.clone()),
+        JitArg::Operand(OperandAst::Memory(mem)) => {
+            if mem.pre_index || mem.post_index.is_some() {
+                return None;
+            }
+            match &mem.offset {
+                ParsedMemoryOffset::None => {}
+                ParsedMemoryOffset::Immediate(expr) if immediate_expr_i64(expr) == Some(0) => {}
+                _ => return None,
+            }
+            if !is_gpr_class(mem.base.class) {
+                return None;
+            }
+            Some(mem.base.clone())
+        }
+        _ => None,
+    }
 }
 
 fn lookup_alias_rule(op_name: &str) -> Option<&'static crate::rules::generated::AliasRule> {
@@ -330,6 +366,60 @@ fn normalize_alias_instruction(
             ];
             Some(inst)
         }
+        AliasTransform::BitfieldBfi
+        | AliasTransform::BitfieldBfxil
+        | AliasTransform::BitfieldSbfiz => {
+            if inst.args.len() != 4 {
+                return None;
+            }
+            let rd = operand_as_gpr_register(inst.args.first()?)?;
+            let rn = operand_as_gpr_register(inst.args.get(1)?)?;
+            let lsb = operand_as_immediate_expr(inst.args.get(2)?)?;
+            let width = operand_as_immediate_expr(inst.args.get(3)?)?;
+            let bits = gpr_data_bits(rd.class)?;
+
+            let (immr, imms): (Expr, Expr) = match rule.transform {
+                AliasTransform::BitfieldBfi | AliasTransform::BitfieldSbfiz => (
+                    parse_quote! { ((-(#lsb) as i64).rem_euclid(#bits)) },
+                    parse_quote! { ((#width) as i64 - 1) },
+                ),
+                AliasTransform::BitfieldBfxil => (
+                    lsb.clone(),
+                    parse_quote! { ((#lsb) as i64 + (#width) as i64 - 1) },
+                ),
+                _ => return None,
+            };
+
+            inst.op_name = rule.canonical.to_owned();
+            inst.args = vec![
+                arg_register(rd),
+                arg_register(rn),
+                arg_immediate(immr),
+                arg_immediate(imms),
+            ];
+            Some(inst)
+        }
+        AliasTransform::BitfieldBfc => {
+            if inst.args.len() != 3 {
+                return None;
+            }
+            let rd = operand_as_gpr_register(inst.args.first()?)?;
+            let lsb = operand_as_immediate_expr(inst.args.get(1)?)?;
+            let width = operand_as_immediate_expr(inst.args.get(2)?)?;
+            let bits = gpr_data_bits(rd.class)?;
+            let zero = zero_register_for_class(rd.class)?;
+            let immr = parse_quote! { ((-(#lsb) as i64).rem_euclid(#bits)) };
+            let imms = parse_quote! { ((#width) as i64 - 1) };
+
+            inst.op_name = rule.canonical.to_owned();
+            inst.args = vec![
+                arg_register(rd),
+                arg_register(zero),
+                arg_immediate(immr),
+                arg_immediate(imms),
+            ];
+            Some(inst)
+        }
         AliasTransform::BitfieldUbfx | AliasTransform::BitfieldSbfx => {
             if inst.args.len() != 4 {
                 return None;
@@ -344,12 +434,45 @@ fn normalize_alias_instruction(
             inst.args = vec![
                 arg_register(rd),
                 arg_register(rn),
-                JitArg::Operand(OperandAst::Immediate(lsb)),
-                JitArg::Operand(OperandAst::Immediate(imms)),
+                arg_immediate(lsb),
+                arg_immediate(imms),
             ];
             Some(inst)
         }
-        _ => None,
+        AliasTransform::StsetlLike => {
+            if inst.args.len() != 2 {
+                return None;
+            }
+            let rs = operand_as_gpr_register(inst.args.first()?)?;
+            let data_class = gpr_data_class(rs.class)?;
+            let zero = zero_register_for_class(data_class)?;
+            let mut rn = extract_stsetl_base(inst.args.get(1)?)?;
+            rn.class = data_class;
+
+            inst.op_name = rule.canonical.to_owned();
+            inst.args = vec![arg_register(zero), arg_register(rn), arg_register(rs)];
+            Some(inst)
+        }
+        AliasTransform::DcLike => {
+            if inst.args.len() != 2 {
+                return None;
+            }
+            let subop = operand_as_immediate_expr(inst.args.first()?)?;
+            let rt = operand_as_gpr_register(inst.args.get(1)?)?;
+            let op1 = parse_quote! { ((((#subop) as i64) >> 16) & 0x7) };
+            let crm = parse_quote! { ((((#subop) as i64) >> 8) & 0xf) };
+            let op2 = parse_quote! { ((((#subop) as i64) >> 5) & 0x7) };
+
+            inst.op_name = rule.canonical.to_owned();
+            inst.args = vec![
+                arg_register(rt),
+                arg_immediate(op1),
+                arg_immediate(parse_quote!(7)),
+                arg_immediate(crm),
+                arg_immediate(op2),
+            ];
+            Some(inst)
+        }
     }
 }
 
