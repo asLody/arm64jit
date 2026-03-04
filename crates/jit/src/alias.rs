@@ -1,7 +1,7 @@
 use crate::generated::MnemonicId;
 use jit_core::{
     AddressingMode, AliasNoMatchHint, ConditionCode, EncodeError, MemoryOffset, NoMatchingHint,
-    Operand, RegClass, RegisterOperand, ShiftKind,
+    Operand, RegClass, RegisterOperand, ShiftKind, ShiftOperand,
 };
 
 pub(crate) const ALIAS_OPERAND_CAP: usize = 16;
@@ -371,10 +371,20 @@ pub(crate) fn canonicalize_alias<'a>(
             scratch[0] = Operand::Register(zero);
             scratch[1] = Operand::Register(lhs);
             copy_operands(scratch, 2, &operands[1..])?;
+            let mut out_len = operands.len() + 1;
+            if operands.len() >= 2
+                && matches!(operands[operands.len() - 1], Operand::Register(_))
+            {
+                scratch[out_len] = Operand::Shift(ShiftOperand {
+                    kind: ShiftKind::Lsl,
+                    amount: 0,
+                });
+                out_len += 1;
+            }
             Ok((
                 Some(MnemonicId(rule.canonical_id)),
                 rule.canonical,
-                &scratch[..operands.len() + 1],
+                &scratch[..out_len],
             ))
         }
         AliasTransform::MovLike => {
@@ -550,14 +560,18 @@ pub(crate) fn canonicalize_alias<'a>(
             let Some(zero) = zero_register_for_class(dst.class) else {
                 return Err(alias_hint(AliasNoMatchHint::MvnDestinationMustBeGpr));
             };
-            let shift_amount = if operands.len() == 2 {
-                0
+            let shift = if operands.len() == 2 {
+                ShiftOperand {
+                    kind: ShiftKind::Lsl,
+                    amount: 0,
+                }
             } else {
                 match operands[2] {
-                    Operand::Immediate(value) => value,
-                    Operand::Shift(shift) if shift.kind == ShiftKind::Lsl => {
-                        i64::from(shift.amount)
-                    }
+                    Operand::Shift(s) => s,
+                    Operand::Immediate(value) => ShiftOperand {
+                        kind: ShiftKind::Lsl,
+                        amount: value as u8,
+                    },
                     _ => {
                         return Err(alias_hint(
                             AliasNoMatchHint::MvnOptionalShiftMustBeImmediateOrLsl,
@@ -569,7 +583,7 @@ pub(crate) fn canonicalize_alias<'a>(
             scratch[0] = Operand::Register(dst);
             scratch[1] = Operand::Register(zero);
             scratch[2] = Operand::Register(src);
-            scratch[3] = Operand::Immediate(shift_amount);
+            scratch[3] = Operand::Shift(shift);
             Ok((
                 Some(MnemonicId(rule.canonical_id)),
                 rule.canonical,

@@ -376,6 +376,34 @@ pub enum ConditionCode {
     Nv,
 }
 
+impl ConditionCode {
+    /// Create a condition code from its 4-bit encoding value.
+    ///
+    /// Panics if `value > 15`.
+    #[inline]
+    pub fn from_u8(value: u8) -> Self {
+        match value {
+            0 => Self::Eq,
+            1 => Self::Ne,
+            2 => Self::Cs,
+            3 => Self::Cc,
+            4 => Self::Mi,
+            5 => Self::Pl,
+            6 => Self::Vs,
+            7 => Self::Vc,
+            8 => Self::Hi,
+            9 => Self::Ls,
+            10 => Self::Ge,
+            11 => Self::Lt,
+            12 => Self::Gt,
+            13 => Self::Le,
+            14 => Self::Al,
+            15 => Self::Nv,
+            _ => panic!("invalid condition code value: {value}"),
+        }
+    }
+}
+
 /// Vector arrangement suffix.
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum VectorArrangement {

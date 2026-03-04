@@ -25,7 +25,7 @@ checksum = "5192cca8006f1fd4f7237516f40fa183bb07f8fbdfedaa0036de5ea9b0b45e78"
 
 [[package]]
 name = "arm64jit"
-version = "0.3.14"
+version = "0.3.15"
 dependencies = [
  "bytemuck",
  "criterion",
@@ -250,11 +250,11 @@ dependencies = [
 
 [[package]]
 name = "jit-core"
-version = "0.1.7"
+version = "0.1.8"
 
 [[package]]
 name = "jit-macro"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "proc-macro2",
  "quote",

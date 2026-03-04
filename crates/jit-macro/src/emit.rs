@@ -267,6 +267,11 @@ fn operand_tokens(operand: OperandAst) -> TokenStream2 {
             let condition = condition_tokens(condition);
             quote! { ::arm64jit::__private::Operand::Condition(#condition) }
         }
+        OperandAst::DynamicCondition(expr) => {
+            quote! { ::arm64jit::__private::Operand::Condition(
+                ::arm64jit::__private::ConditionCode::from_u8((#expr) as u8)
+            ) }
+        }
         OperandAst::RegisterList(list) => {
             let first = register_tokens(&list.first);
             let count = list.count;
@@ -317,7 +322,7 @@ fn reloc_kind_tokens(
     if (reloc_mask & crate::rules::generated::RELOC_MASK_BCOND19) != 0
         && matches!(
             args.first(),
-            Some(JitArg::Operand(OperandAst::Condition(_)))
+            Some(JitArg::Operand(OperandAst::Condition(_) | OperandAst::DynamicCondition(_)))
         )
     {
         return Some(quote! { ::arm64jit::__private::BranchRelocKind::BCond19 });

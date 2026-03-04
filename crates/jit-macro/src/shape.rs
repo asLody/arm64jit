@@ -122,7 +122,7 @@ fn shape_tokens_for_arg(arg: &JitArg, out: &mut Vec<FlatKindToken>) -> Option<()
                 push_shape_token(out, 7, false, None);
                 Some(())
             }
-            OperandAst::Condition(_) => {
+            OperandAst::Condition(_) | OperandAst::DynamicCondition(_) => {
                 push_shape_token(out, 8, false, None);
                 Some(())
             }

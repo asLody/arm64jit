@@ -1,6 +1,6 @@
 [package]
 name = "arm64jit"
-version = "0.3.14"
+version = "0.3.15"
 edition.workspace = true
 license.workspace = true
 description = "Spec-driven AArch64 JIT assembler for Rust"
@@ -12,8 +12,8 @@ exclude = ["spec/*"]
 default = []
 
 [dependencies]
-jit-core = { path = "../jit-core", version = "0.1.7" }
-jit-macro = { path = "../jit-macro", version = "0.2.7" }
+jit-core = { path = "../jit-core", version = "0.1.8" }
+jit-macro = { path = "../jit-macro", version = "0.2.8" }
 bytemuck = { version = "1.24", default-features = false }
 
 

@@ -4,6 +4,7 @@ use crate::ast::{
     ParsedRegister, ParsedRegisterList, ParsedSysReg, ShiftKindAst,
 };
 use crate::normalize::normalize_instruction_stmt;
+use proc_macro2::TokenStream as TokenStream2;
 use quote::quote;
 use syn::parse::discouraged::Speculative;
 use syn::parse::{Parse, ParseStream};
@@ -111,6 +112,10 @@ impl Parse for JitArg {
         let expr = input.parse::<Expr>()?;
         if has_hash {
             return Ok(Self::Operand(OperandAst::Immediate(expr)));
+        }
+
+        if let Some(dyn_cond) = parse_dynamic_condition_expr(&expr) {
+            return Ok(Self::Operand(OperandAst::DynamicCondition(dyn_cond)));
         }
 
         if let Some(cond) = parse_condition_expr(&expr) {
@@ -667,6 +672,23 @@ fn parse_register_literal_expr(expr: &ExprPath) -> Option<ParsedRegister> {
 struct ParsedRegisterLiteral {
     code: u8,
     class: &'static str,
+}
+
+fn parse_dynamic_condition_expr(expr: &Expr) -> Option<TokenStream2> {
+    let Expr::Call(ExprCall { func, args, .. }) = expr else {
+        return None;
+    };
+    let Expr::Path(ExprPath { path, .. }) = &**func else {
+        return None;
+    };
+    if path.segments.len() != 1 || args.len() != 1 {
+        return None;
+    }
+    if path.segments[0].ident.to_string() != "Cond" {
+        return None;
+    }
+    let arg = args.first()?.clone();
+    Some(quote! { #arg })
 }
 
 fn parse_dynamic_register_expr(call: &ExprCall) -> Option<ParsedRegister> {

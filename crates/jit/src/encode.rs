@@ -195,7 +195,7 @@ mod tests {
     use alloc::vec::Vec;
     use jit_core::{
         AddressingMode, AliasNoMatchHint, ConditionCode, MemoryOffset, MemoryOperand,
-        NoMatchingHint, RegClass, RegisterOperand,
+        NoMatchingHint, RegClass, RegisterOperand, ShiftKind, ShiftOperand,
     };
 
     fn x(code: u8) -> Operand {
@@ -460,5 +460,53 @@ mod tests {
             keys_pre[0], keys_post[0],
             "preindex/postindex keys should differ"
         );
+    }
+
+    fn shift_lsl(amount: u8) -> Operand {
+        Operand::Shift(ShiftOperand {
+            kind: ShiftKind::Lsl,
+            amount,
+        })
+    }
+
+    #[test]
+    fn encode_tst_register_alias() {
+        let tst = encode("tst", &[x(10), x(10)]).expect("tst X10, X10 should encode");
+        let ands = encode("ands", &[x(31), x(10), x(10), shift_lsl(0)])
+            .expect("canonical ands XZR, X10, X10, LSL #0");
+        assert_eq!(tst.unpack(), ands.unpack(), "tst register alias mismatch");
+
+        let tst_w = encode("tst", &[w(5), w(6)]).expect("tst W5, W6 should encode");
+        let ands_w = encode("ands", &[w(31), w(5), w(6), shift_lsl(0)])
+            .expect("canonical ands WZR, W5, W6, LSL #0");
+        assert_eq!(
+            tst_w.unpack(),
+            ands_w.unpack(),
+            "tst 32-bit register alias mismatch"
+        );
+    }
+
+    #[test]
+    fn encode_cmp_register_alias() {
+        let cmp = encode("cmp", &[x(0), x(1)]).expect("cmp X0, X1 should encode");
+        let subs = encode("subs", &[x(31), x(0), x(1), shift_lsl(0)])
+            .expect("canonical subs XZR, X0, X1, LSL #0");
+        assert_eq!(cmp.unpack(), subs.unpack(), "cmp register alias mismatch");
+    }
+
+    #[test]
+    fn encode_cmn_register_alias() {
+        let cmn = encode("cmn", &[x(2), x(3)]).expect("cmn X2, X3 should encode");
+        let adds = encode("adds", &[x(31), x(2), x(3), shift_lsl(0)])
+            .expect("canonical adds XZR, X2, X3, LSL #0");
+        assert_eq!(cmn.unpack(), adds.unpack(), "cmn register alias mismatch");
+    }
+
+    #[test]
+    fn encode_mvn_register_alias() {
+        let mvn = encode("mvn", &[x(0), x(1)]).expect("mvn X0, X1 should encode");
+        let eon = encode("eon", &[x(0), x(31), x(1), shift_lsl(0)])
+            .expect("canonical eon X0, XZR, X1, LSL #0");
+        assert_eq!(mvn.unpack(), eon.unpack(), "mvn register alias mismatch");
     }
 }

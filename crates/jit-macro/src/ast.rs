@@ -134,6 +134,7 @@ pub(crate) enum OperandAst {
         amount: Option<Expr>,
     },
     Condition(ConditionAst),
+    DynamicCondition(TokenStream2),
     RegisterList(ParsedRegisterList),
     SysReg(ParsedSysReg),
 }
